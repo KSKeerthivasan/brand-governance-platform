@@ -5,6 +5,15 @@ import { api } from '../services/api';
 interface AuthContextType extends AuthState {
   login: (email: string, pass: string) => Promise<void>;
   switchPersona: (role: UserRole) => Promise<void>;
+  onboard: (payload: {
+    organization_name: string;
+    organization_slug: string;
+    brand_name: string;
+    brand_description?: string;
+    admin_full_name: string;
+    admin_email: string;
+    admin_password: string;
+  }) => Promise<void>;
   logout: () => void;
   loading: boolean;
 }
@@ -108,6 +117,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const onboard = async (payload: {
+    organization_name: string;
+    organization_slug: string;
+    brand_name: string;
+    brand_description?: string;
+    admin_full_name: string;
+    admin_email: string;
+    admin_password: string;
+  }) => {
+    setLoading(true);
+    try {
+      const res = await api.onboardOrganization(payload);
+      api.setAuth(res.access_token, res.organization_id);
+      setAuthState({
+        token: res.access_token,
+        user: res.user,
+        organizationId: res.organization_id,
+        organizationName: res.organization_name,
+        organizationSlug: res.organization_slug,
+        role: res.role,
+        isAuthenticated: true,
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const logout = () => {
     api.setAuth(null, null);
     setAuthState({
@@ -122,7 +158,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ ...authState, login, switchPersona, logout, loading }}>
+    <AuthContext.Provider value={{ ...authState, login, switchPersona, onboard, logout, loading }}>
       {children}
     </AuthContext.Provider>
   );

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { ShieldCheck, ArrowRight, UserCheck, Lock, Mail } from 'lucide-react';
+import { useNavigate, Link } from 'react-router-dom';
+import { ShieldCheck, ArrowRight, UserCheck, Lock, Mail, Building2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { UserRole } from '../types';
 
@@ -190,6 +190,13 @@ export const Login: React.FC = () => {
             <button type="submit" disabled={loading} className="btn btn-primary" style={{ width: '100%', marginTop: 8, padding: '10px 16px' }}>
               {loading ? 'Authenticating...' : 'Sign In with Email'}
             </button>
+
+            <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--border-subtle)', textAlign: 'center' }}>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>Need an isolated workspace? </span>
+              <Link to="/onboarding" style={{ fontSize: '0.82rem', color: '#818cf8', fontWeight: 600, textDecoration: 'none' }}>
+                Onboard new organization →
+              </Link>
+            </div>
           </form>
         </div>
       </div>

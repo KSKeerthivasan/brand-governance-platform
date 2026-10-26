@@ -80,6 +80,21 @@ class ApiService {
   }
 
   // Organizations & Members
+  async onboardOrganization(payload: {
+    organization_name: string;
+    organization_slug: string;
+    brand_name: string;
+    brand_description?: string;
+    admin_full_name: string;
+    admin_email: string;
+    admin_password: string;
+  }) {
+    return this.request<any>('/organizations', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
   async getCurrentOrg(): Promise<Organization> {
     return this.request<Organization>('/organizations/current');
   }
