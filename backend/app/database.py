@@ -10,29 +10,32 @@ Base = declarative_base()
 
 def get_engine():
     primary_url = os.getenv("DATABASE_URL", settings.DATABASE_URL)
-    fallback_url = os.getenv("SQLITE_FALLBACK_URL", settings.SQLITE_FALLBACK_URL)
     
-    # Try primary PostgreSQL database first
     if primary_url.startswith("postgresql"):
         try:
-            test_engine = create_engine(
+            db_engine = create_engine(
                 primary_url,
-                connect_args={"connect_timeout": 2},
+                connect_args={"connect_timeout": 5},
                 pool_pre_ping=True
             )
-            with test_engine.connect() as conn:
+            with db_engine.connect() as conn:
                 conn.execute(text("SELECT 1"))
-            logger.info(f"Connected successfully to PostgreSQL database: {primary_url.split('@')[-1]}")
-            return test_engine
+            # Mask credentials when logging host/database
+            target_info = primary_url.split("@")[-1] if "@" in primary_url else primary_url
+            logger.info(f"Connected successfully to PostgreSQL database at: {target_info}")
+            return db_engine
         except Exception as e:
-            logger.warning(
-                f"Could not connect to PostgreSQL ({e}). Falling back to local database: {fallback_url}"
+            target_info = primary_url.split("@")[-1] if "@" in primary_url else "configured host"
+            error_msg = (
+                f"Failed to connect to configured PostgreSQL database ({target_info}): {e}. "
+                "Silent SQLite fallback is disabled. Please verify that the PostgreSQL instance is running, "
+                "accessible, and that credentials and network policies are correctly configured in .env."
             )
-            return create_engine(
-                fallback_url,
-                connect_args={"check_same_thread": False} if fallback_url.startswith("sqlite") else {}
-            )
+            logger.error(error_msg)
+            raise ConnectionError(error_msg) from e
     else:
+        # SQLite used only when explicitly configured (e.g. isolated test environments)
+        logger.info(f"Using database engine: {primary_url}")
         return create_engine(
             primary_url,
             connect_args={"check_same_thread": False} if primary_url.startswith("sqlite") else {}

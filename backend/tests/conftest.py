@@ -8,11 +8,12 @@ from sqlalchemy.orm import sessionmaker
 # Ensure backend root is on sys.path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+TEST_DB_URL = "sqlite:///./test_inkloom.db"
+os.environ["DATABASE_URL"] = TEST_DB_URL
+
 from app.database import Base, get_db
 from app.main import app
 from seed import seed_freshsip_data
-
-TEST_DB_URL = "sqlite:///./test_inkloom.db"
 test_engine = create_engine(TEST_DB_URL, connect_args={"check_same_thread": False})
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
 

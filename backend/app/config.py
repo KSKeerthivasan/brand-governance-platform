@@ -14,7 +14,6 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
     
     DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/inkloom_ai"
-    SQLITE_FALLBACK_URL: str = "sqlite:///./inkloom_ai.db"
     
     STORAGE_BACKEND: str = "local"
     LOCAL_STORAGE_DIR: str = "./storage_data"
