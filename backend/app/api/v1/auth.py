@@ -39,7 +39,7 @@ def login(login_data: UserLogin, db: Session = Depends(get_db)):
     return Token(
         access_token=access_token,
         token_type="bearer",
-        user=UserOut.from_orm(user),
+        user=UserOut.model_validate(user),
         organization_id=org.id,
         organization_name=org.name,
         organization_slug=org.slug,
@@ -94,7 +94,7 @@ def dev_login(req: DevLoginRequest, db: Session = Depends(get_db)):
     return Token(
         access_token=access_token,
         token_type="bearer",
-        user=UserOut.from_orm(user),
+        user=UserOut.model_validate(user),
         organization_id=org.id,
         organization_name=org.name,
         organization_slug=org.slug,
@@ -122,6 +122,6 @@ def get_current_user_profile(
             })
 
     return {
-        "user": UserOut.from_orm(current_user),
+        "user": UserOut.model_validate(current_user),
         "organizations": org_list
     }

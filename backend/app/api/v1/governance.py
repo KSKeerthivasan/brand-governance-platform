@@ -62,8 +62,8 @@ def run_governance_check(
     )
 
     findings = db.query(GovernanceFinding).filter(GovernanceFinding.governance_run_id == run.id).all()
-    out = GovernanceRunOut.from_orm(run)
-    out.findings = [GovernanceFindingOut.from_orm(f) for f in findings]
+    out = GovernanceRunOut.model_validate(run)
+    out.findings = [GovernanceFindingOut.model_validate(f) for f in findings]
     return out
 
 
@@ -93,8 +93,8 @@ def get_latest_governance_run(
         raise HTTPException(status_code=404, detail="No governance runs recorded for this version.")
 
     findings = db.query(GovernanceFinding).filter(GovernanceFinding.governance_run_id == latest_run.id).all()
-    out = GovernanceRunOut.from_orm(latest_run)
-    out.findings = [GovernanceFindingOut.from_orm(f) for f in findings]
+    out = GovernanceRunOut.model_validate(latest_run)
+    out.findings = [GovernanceFindingOut.model_validate(f) for f in findings]
     return out
 
 

@@ -139,7 +139,7 @@ async def upload_knowledge_document(
         }
     )
 
-    out = KnowledgeSourceOut.from_orm(source)
+    out = KnowledgeSourceOut.model_validate(source)
     out.rules_count = rules_created
     out.facts_count = facts_created
     out.assets_count = assets_created
@@ -161,7 +161,7 @@ def list_knowledge_sources(
         f_cnt = db.query(KnowledgeFact).filter(KnowledgeFact.source_id == s.id).count()
         a_cnt = db.query(BrandAsset).filter(BrandAsset.source_id == s.id).count()
         
-        out = KnowledgeSourceOut.from_orm(s)
+        out = KnowledgeSourceOut.model_validate(s)
         out.rules_count = r_cnt
         out.facts_count = f_cnt
         out.assets_count = a_cnt

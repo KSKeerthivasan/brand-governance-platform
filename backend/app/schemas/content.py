@@ -1,5 +1,5 @@
 from typing import Optional, List
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from datetime import datetime
 
 class ContentVersionOut(BaseModel):
@@ -11,8 +11,7 @@ class ContentVersionOut(BaseModel):
     created_by: Optional[str] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class ContentItemCreate(BaseModel):
     brand_id: str
@@ -23,7 +22,7 @@ class ContentItemCreate(BaseModel):
 class ContentItemUpdate(BaseModel):
     title: Optional[str] = None
     channel: Optional[str] = None
-    body_text: str  # Creating/updating body_text creates a new ContentVersion if text changes!
+    body_text: str
 
 class ContentItemOut(BaseModel):
     id: str
@@ -38,5 +37,4 @@ class ContentItemOut(BaseModel):
     updated_at: datetime
     latest_version: Optional[ContentVersionOut] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

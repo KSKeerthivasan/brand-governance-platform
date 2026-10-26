@@ -1,5 +1,5 @@
 from typing import Optional, List
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from datetime import datetime
 
 class OrganizationBase(BaseModel):
@@ -14,8 +14,7 @@ class OrganizationOut(OrganizationBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class MembershipCreate(BaseModel):
     user_email: str
@@ -30,8 +29,7 @@ class MembershipOut(BaseModel):
     role: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class BrandBase(BaseModel):
     name: str
@@ -45,5 +43,4 @@ class BrandOut(BrandBase):
     organization_id: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

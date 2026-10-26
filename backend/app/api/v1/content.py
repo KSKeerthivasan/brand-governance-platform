@@ -59,8 +59,8 @@ def create_content_item(
         details={"channel": req.channel, "checksum": checksum}
     )
 
-    out = ContentItemOut.from_orm(content_item)
-    out.latest_version = ContentVersionOut.from_orm(version)
+    out = ContentItemOut.model_validate(content_item)
+    out.latest_version = ContentVersionOut.model_validate(version)
     return out
 
 
@@ -80,9 +80,9 @@ def list_content_items(
             ContentVersion.version_num == item.current_version_num
         ).first()
 
-        out = ContentItemOut.from_orm(item)
+        out = ContentItemOut.model_validate(item)
         if latest_ver:
-            out.latest_version = ContentVersionOut.from_orm(latest_ver)
+            out.latest_version = ContentVersionOut.model_validate(latest_ver)
         result.append(out)
 
     return result
@@ -107,9 +107,9 @@ def get_content_item(
         ContentVersion.version_num == item.current_version_num
     ).first()
 
-    out = ContentItemOut.from_orm(item)
+    out = ContentItemOut.model_validate(item)
     if latest_ver:
-        out.latest_version = ContentVersionOut.from_orm(latest_ver)
+        out.latest_version = ContentVersionOut.model_validate(latest_ver)
     return out
 
 
@@ -180,17 +180,17 @@ def update_content_item(
             details={"previous_version": latest_ver.version_num if latest_ver else 1, "new_version": new_version_num}
         )
 
-        out = ContentItemOut.from_orm(item)
-        out.latest_version = ContentVersionOut.from_orm(new_version)
+        out = ContentItemOut.model_validate(item)
+        out.latest_version = ContentVersionOut.model_validate(new_version)
         return out
     else:
         # Only metadata changed, text is identical
         item.updated_at = datetime.utcnow()
         db.commit()
         db.refresh(item)
-        out = ContentItemOut.from_orm(item)
+        out = ContentItemOut.model_validate(item)
         if latest_ver:
-            out.latest_version = ContentVersionOut.from_orm(latest_ver)
+            out.latest_version = ContentVersionOut.model_validate(latest_ver)
         return out
 
 

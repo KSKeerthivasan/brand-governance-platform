@@ -1,5 +1,5 @@
 from typing import Optional, List
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from datetime import datetime
 
 class KnowledgeRuleBase(BaseModel):
@@ -30,8 +30,7 @@ class KnowledgeRuleOut(KnowledgeRuleBase):
     review_notes: Optional[str] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class KnowledgeFactBase(BaseModel):
     product_name: str
@@ -62,8 +61,7 @@ class KnowledgeFactOut(KnowledgeFactBase):
     review_notes: Optional[str] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class BrandAssetBase(BaseModel):
     asset_name: str
@@ -90,8 +88,7 @@ class BrandAssetOut(BrandAssetBase):
     reviewed_at: Optional[datetime] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class KnowledgeSourceOut(BaseModel):
     id: str
@@ -112,5 +109,4 @@ class KnowledgeSourceOut(BaseModel):
     facts_count: Optional[int] = 0
     assets_count: Optional[int] = 0
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

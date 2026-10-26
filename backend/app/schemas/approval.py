@@ -1,5 +1,5 @@
 from typing import Optional, List
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from datetime import datetime
 
 class ApprovalSubmissionCreate(BaseModel):
@@ -22,8 +22,7 @@ class ApprovalDecisionOut(BaseModel):
     comments: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class ApprovalSubmissionOut(BaseModel):
     id: str
@@ -41,5 +40,4 @@ class ApprovalSubmissionOut(BaseModel):
     created_at: datetime
     decisions: List[ApprovalDecisionOut] = []
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
