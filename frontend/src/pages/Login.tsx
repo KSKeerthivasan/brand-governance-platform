@@ -9,6 +9,7 @@ export const Login: React.FC = () => {
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [orgSlug, setOrgSlug] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -48,7 +49,7 @@ export const Login: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      await login(email, password);
+      await login(email, password, undefined, orgSlug.trim() || undefined);
       navigate('/');
     } catch (err: any) {
       setError(err.message || 'Login failed.');
@@ -179,6 +180,19 @@ export const Login: React.FC = () => {
               <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginTop: 4 }}>
                 Default demo password: <code>Freshsip2026!</code>
               </span>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">
+                Workspace Slug <span style={{ color: 'var(--text-dim)', fontWeight: 400 }}>(Optional for single-org users)</span>
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. freshsip or solis-botanical-brews"
+                value={orgSlug}
+                onChange={(e) => setOrgSlug(e.target.value)}
+                className="input"
+              />
             </div>
 
             {error && (

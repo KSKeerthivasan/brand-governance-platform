@@ -39,6 +39,7 @@ backend/inkloom_ai.db
 backend/test_inkloom.db
 backend/storage_data/
 storage_data/
+test_assets/
 
 # Testing & Coverage
 .pytest_cache/

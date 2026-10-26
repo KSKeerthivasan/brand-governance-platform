@@ -165,57 +165,113 @@ def list_org_members(
         ))
     return result
 
-@router.post("/members", response_model=MembershipOut)
+PERMITTED_PROVISION_ROLES = [
+    OrganizationRole.KNOWLEDGE_REVIEWER,
+    OrganizationRole.CONTENT_CREATOR,
+    OrganizationRole.APPROVAL_MANAGER
+]
+
+@router.post("/members", response_model=MembershipOut, status_code=status.HTTP_201_CREATED)
 def add_org_member(
     req: MembershipCreate,
     membership: OrganizationMembership = Depends(require_org_admin),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    if req.role not in OrganizationRole.ALL_ROLES:
+    # 1. Enforce strict role boundary: org_admin cannot be provisioned via member form
+    if req.role == OrganizationRole.ORG_ADMIN:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid role '{req.role}'. Valid roles: {', '.join(OrganizationRole.ALL_ROLES)}"
+            detail="Cannot provision additional Organization Administrators through this form. Permitted roles: knowledge_reviewer, content_creator, approval_manager."
         )
 
-    user = db.query(User).filter(User.email == req.user_email).first()
-    if not user:
+    if req.role not in PERMITTED_PROVISION_ROLES:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"User with email '{req.user_email}' not found."
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid role '{req.role}'. Permitted roles: {', '.join(PERMITTED_PROVISION_ROLES)}"
         )
 
-    existing = db.query(OrganizationMembership).filter(
-        OrganizationMembership.organization_id == membership.organization_id,
-        OrganizationMembership.user_id == user.id
-    ).first()
+    clean_email = req.user_email.strip().lower()
 
-    if existing:
-        existing.role = req.role
-        db.commit()
-        db.refresh(existing)
-        target_membership = existing
-    else:
-        new_m = OrganizationMembership(
+    # 2. Check if user already exists
+    user = db.query(User).filter(User.email == clean_email).first()
+
+    if user:
+        # Check if already a member of this organization
+        existing_m = db.query(OrganizationMembership).filter(
+            OrganizationMembership.organization_id == membership.organization_id,
+            OrganizationMembership.user_id == user.id
+        ).first()
+        if existing_m:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"User with email '{clean_email}' is already a member of this organization with role '{existing_m.role}'."
+            )
+
+        target_membership = OrganizationMembership(
             organization_id=membership.organization_id,
             user_id=user.id,
             role=req.role
         )
-        db.add(new_m)
-        db.commit()
-        db.refresh(new_m)
-        target_membership = new_m
+        db.add(target_membership)
+        db.flush()
 
-    log_audit_event(
-        db=db,
-        organization_id=membership.organization_id,
-        user_id=current_user.id,
-        event_type="ROLE_ASSIGNED",
-        entity_type="membership",
-        entity_id=target_membership.id,
-        summary=f"Assigned role '{req.role}' to {user.email}",
-        details={"user_email": user.email, "role": req.role}
-    )
+        log_audit_event(
+            db=db,
+            organization_id=membership.organization_id,
+            user_id=current_user.id,
+            event_type="ROLE_ASSIGNED",
+            entity_type="membership",
+            entity_id=target_membership.id,
+            summary=f"Assigned role '{req.role}' to {user.email}",
+            details={"user_email": user.email, "role": req.role}
+        )
+    else:
+        # User does not exist: provision new user transactionally
+        if not req.full_name or len(req.full_name.strip()) < 2:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Full name is required when provisioning a new user (minimum 2 characters)."
+            )
+
+        if not req.password or len(req.password) < 8:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Password is required when provisioning a new user (minimum 8 characters)."
+            )
+
+        hashed_pw = get_password_hash(req.password)
+        new_user = User(
+            email=clean_email,
+            hashed_password=hashed_pw,
+            full_name=req.full_name.strip(),
+            is_active=True
+        )
+        db.add(new_user)
+        db.flush()
+
+        target_membership = OrganizationMembership(
+            organization_id=membership.organization_id,
+            user_id=new_user.id,
+            role=req.role
+        )
+        db.add(target_membership)
+        db.flush()
+
+        log_audit_event(
+            db=db,
+            organization_id=membership.organization_id,
+            user_id=current_user.id,
+            event_type="MEMBER_PROVISIONED",
+            entity_type="membership",
+            entity_id=target_membership.id,
+            summary=f"Provisioned new member '{new_user.full_name}' ({new_user.email}) with role '{req.role}'",
+            details={"user_email": new_user.email, "role": req.role, "full_name": new_user.full_name}
+        )
+        user = new_user
+
+    db.commit()
+    db.refresh(target_membership)
 
     return MembershipOut(
         id=target_membership.id,

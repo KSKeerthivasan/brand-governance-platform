@@ -35,8 +35,10 @@ class OrganizationOut(OrganizationBase):
     model_config = ConfigDict(from_attributes=True)
 
 class MembershipCreate(BaseModel):
-    user_email: str
-    role: str
+    user_email: EmailStr = Field(..., description="Corporate or member email address")
+    role: str = Field(..., description="Assigned role: knowledge_reviewer, content_creator, approval_manager")
+    full_name: Optional[str] = Field(None, min_length=2, max_length=255, description="Full name of the team member")
+    password: Optional[str] = Field(None, min_length=8, max_length=128, description="Initial secure account password")
 
 class MembershipOut(BaseModel):
     id: str

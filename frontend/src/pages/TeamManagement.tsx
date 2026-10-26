@@ -7,10 +7,13 @@ import { Member } from '../types';
 export const TeamManagement: React.FC = () => {
   const { role, organizationName } = useAuth();
   const [members, setMembers] = useState<Member[]>([]);
+  const [fullName, setFullName] = useState('');
   const [newEmail, setNewEmail] = useState('');
-  const [newRole, setNewRole] = useState('content_creator');
+  const [password, setPassword] = useState('');
+  const [newRole, setNewRole] = useState('knowledge_reviewer');
   const [submitting, setSubmitting] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const isAdmin = role === 'org_admin';
 
@@ -34,13 +37,27 @@ export const TeamManagement: React.FC = () => {
     e.preventDefault();
     if (!newEmail) return;
     setSubmitting(true);
+    setStatusMessage(null);
     try {
-      await api.addMember(newEmail, newRole);
-      alert(`Role '${newRole}' assigned to ${newEmail}`);
+      await api.addMember({
+        user_email: newEmail,
+        role: newRole,
+        full_name: fullName.trim() || undefined,
+        password: password || undefined,
+      });
+      setStatusMessage({
+        type: 'success',
+        text: `Team member '${newEmail}' provisioned successfully with role '${newRole.replace('_', ' ')}'.`
+      });
+      setFullName('');
       setNewEmail('');
+      setPassword('');
       await loadMembers();
     } catch (err: any) {
-      alert(`Error: ${err.message}`);
+      setStatusMessage({
+        type: 'error',
+        text: err.message || 'Failed to provision member.'
+      });
     } finally {
       setSubmitting(false);
     }
@@ -122,18 +139,45 @@ export const TeamManagement: React.FC = () => {
           )}
         </div>
 
-        {/* Add/Update Member Card */}
+        {/* Provision Member Card */}
         <div className="card">
           <h2 className="title-md" style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <UserPlus size={18} color="#818cf8" /> Assign Member Role
+            <UserPlus size={18} color="#818cf8" /> Provision Team Member
           </h2>
+
+          {statusMessage && (
+            <div style={{
+              padding: '10px 14px',
+              borderRadius: 8,
+              fontSize: '0.82rem',
+              marginBottom: 16,
+              background: statusMessage.type === 'success' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(244, 63, 94, 0.15)',
+              border: `1px solid ${statusMessage.type === 'success' ? 'rgba(16, 185, 129, 0.3)' : 'rgba(244, 63, 94, 0.3)'}`,
+              color: statusMessage.type === 'success' ? '#34d399' : '#fb7185'
+            }}>
+              {statusMessage.text}
+            </div>
+          )}
 
           <form onSubmit={handleAddMember}>
             <div className="form-group">
-              <label className="form-label">User Email</label>
+              <label className="form-label">Full Name</label>
+              <input
+                type="text"
+                placeholder="e.g. Rachel Reviewer"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                className="input"
+                disabled={!isAdmin}
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Work Email</label>
               <input
                 type="email"
-                placeholder="e.g. colleague@freshsip.demo"
+                placeholder="e.g. reviewer@solisbrews.demo"
                 value={newEmail}
                 onChange={(e) => setNewEmail(e.target.value)}
                 className="input"
@@ -143,22 +187,38 @@ export const TeamManagement: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Assigned Role</label>
+              <label className="form-label">Assigned Governance Role</label>
               <select
                 value={newRole}
                 onChange={(e) => setNewRole(e.target.value)}
                 className="select"
                 disabled={!isAdmin}
               >
-                <option value="content_creator">Content Creator</option>
                 <option value="knowledge_reviewer">Knowledge Reviewer</option>
+                <option value="content_creator">Content Creator</option>
                 <option value="approval_manager">Approval Manager</option>
-                <option value="org_admin">Organization Administrator</option>
               </select>
+              <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginTop: 4, display: 'block' }}>
+                Org Admin role cannot be provisioned through this form.
+              </span>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Initial Password</label>
+              <input
+                type="password"
+                placeholder="Minimum 8 characters"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="input"
+                disabled={!isAdmin}
+                minLength={8}
+                required
+              />
             </div>
 
             <button type="submit" disabled={!isAdmin || submitting} className="btn btn-primary" style={{ width: '100%', marginTop: 8 }}>
-              {submitting ? 'Updating...' : 'Assign Role'}
+              {submitting ? 'Provisioning...' : 'Provision Member'}
             </button>
           </form>
         </div>

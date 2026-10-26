@@ -3,7 +3,8 @@ import { User, UserRole, AuthState } from '../types';
 import { api } from '../services/api';
 
 interface AuthContextType extends AuthState {
-  login: (email: string, pass: string) => Promise<void>;
+  login: (email: string, pass: string, orgId?: string, orgSlug?: string) => Promise<void>;
+  switchOrg: (orgId?: string, orgSlug?: string) => Promise<void>;
   switchPersona: (role: UserRole) => Promise<void>;
   onboard: (payload: {
     organization_name: string;
@@ -42,17 +43,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         if (savedToken) {
           const profile = await api.getMe();
-          const primaryOrg = profile.organizations[0];
+          const targetOrg = profile.organizations?.find((o: any) => o.organization_id === savedOrgId) || profile.organizations?.[0];
           setAuthState({
             token: savedToken,
             user: profile.user,
-            organizationId: primaryOrg?.organization_id || savedOrgId,
-            organizationName: primaryOrg?.organization_name || 'Freshsip Beverage Co.',
-            organizationSlug: primaryOrg?.organization_slug || 'freshsip',
-            role: primaryOrg?.role || 'content_creator',
+            organizationId: targetOrg?.organization_id || savedOrgId,
+            organizationName: targetOrg?.organization_name || 'Freshsip Beverage Co.',
+            organizationSlug: targetOrg?.organization_slug || 'freshsip',
+            role: targetOrg?.role || 'content_creator',
             isAuthenticated: true,
           });
-          api.setAuth(savedToken, primaryOrg?.organization_id || savedOrgId);
+          api.setAuth(savedToken, targetOrg?.organization_id || savedOrgId);
         } else {
           // Auto-init as Content Creator for effortless first glance
           await switchPersona('content_creator');
@@ -79,10 +80,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     init();
   }, []);
 
-  const login = async (email: string, pass: string) => {
+  const login = async (email: string, pass: string, orgId?: string, orgSlug?: string) => {
     setLoading(true);
     try {
-      const res = await api.login(email, pass);
+      const res = await api.login(email, pass, orgId, orgSlug);
+      api.setAuth(res.access_token, res.organization_id);
+      setAuthState({
+        token: res.access_token,
+        user: res.user,
+        organizationId: res.organization_id,
+        organizationName: res.organization_name,
+        organizationSlug: res.organization_slug,
+        role: res.role,
+        isAuthenticated: true,
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const switchOrg = async (orgId?: string, orgSlug?: string) => {
+    setLoading(true);
+    try {
+      const res = await api.switchOrg(orgId, orgSlug);
       api.setAuth(res.access_token, res.organization_id);
       setAuthState({
         token: res.access_token,
@@ -158,7 +178,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ ...authState, login, switchPersona, onboard, logout, loading }}>
+    <AuthContext.Provider value={{ ...authState, login, switchOrg, switchPersona, onboard, logout, loading }}>
       {children}
     </AuthContext.Provider>
   );

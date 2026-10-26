@@ -61,10 +61,25 @@ class ApiService {
   }
 
   // Auth
-  async login(email: string, password: string) {
+  async login(email: string, password: string, organizationId?: string, organizationSlug?: string) {
     return this.request<any>('/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ email, password })
+      body: JSON.stringify({
+        email,
+        password,
+        organization_id: organizationId,
+        organization_slug: organizationSlug
+      })
+    });
+  }
+
+  async switchOrg(organizationId?: string, organizationSlug?: string) {
+    return this.request<any>('/auth/switch-org', {
+      method: 'POST',
+      body: JSON.stringify({
+        organization_id: organizationId,
+        organization_slug: organizationSlug
+      })
     });
   }
 
@@ -103,10 +118,10 @@ class ApiService {
     return this.request<Member[]>('/organizations/members');
   }
 
-  async addMember(userEmail: string, role: string): Promise<Member> {
+  async addMember(payload: { user_email: string; role: string; full_name?: string; password?: string }): Promise<Member> {
     return this.request<Member>('/organizations/members', {
       method: 'POST',
-      body: JSON.stringify({ user_email: userEmail, role })
+      body: JSON.stringify(payload)
     });
   }
 

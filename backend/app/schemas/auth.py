@@ -12,6 +12,12 @@ class UserCreate(UserBase):
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
+    organization_id: Optional[str] = None
+    organization_slug: Optional[str] = None
+
+class SwitchOrgRequest(BaseModel):
+    organization_id: Optional[str] = None
+    organization_slug: Optional[str] = None
 
 class DevLoginRequest(BaseModel):
     role: str  # org_admin, knowledge_reviewer, content_creator, approval_manager
