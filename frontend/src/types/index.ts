@@ -15,6 +15,7 @@ export interface AuthState {
   organizationName: string | null;
   organizationSlug: string | null;
   role: UserRole | null;
+  isDemo: boolean;
   isAuthenticated: boolean;
 }
 
@@ -73,6 +74,19 @@ export interface KnowledgeRule {
   severity: 'critical' | 'warning' | 'info';
   context_condition?: string;
   source_citation?: string;
+  rule_code?: string;
+  source_status?: 'approved' | 'pending_review' | 'expired' | 'rejected' | 'unknown';
+  enforcement_action?: string;
+  rationale?: string;
+  recommended_alternatives?: string;
+  exceptions?: string;
+  examples_bad?: string;
+  examples_good?: string;
+  evidence_passage?: string;
+  page_number?: number;
+  evidence_validation?: string;
+  uncertainty_notes?: string;
+  is_corrected?: boolean;
   status: 'pending_review' | 'approved' | 'rejected' | 'deprecated';
   reviewed_by?: string;
   reviewed_at?: string;
@@ -91,6 +105,14 @@ export interface KnowledgeFact {
   fact_value: string;
   supporting_evidence?: string;
   source_citation?: string;
+  product_id?: string;
+  unit?: string;
+  value_status?: string;
+  source_status?: 'approved' | 'pending_review' | 'expired' | 'rejected' | 'unknown';
+  page_number?: number;
+  evidence_validation?: string;
+  uncertainty_notes?: string;
+  is_corrected?: boolean;
   valid_from?: string;
   valid_until?: string;
   status: 'pending_review' | 'approved' | 'rejected' | 'expired';
@@ -127,6 +149,12 @@ export interface ContentVersion {
   checksum: string;
   created_by?: string;
   created_at: string;
+  poster_file_path?: string;
+  poster_asset_id?: string;
+  poster_alt_text?: string;
+  poster_url?: string;
+  is_pdf?: boolean;
+  page_count?: number;
 }
 
 export interface ContentItem {
@@ -147,16 +175,60 @@ export interface GovernanceFinding {
   id: string;
   governance_run_id: string;
   category: string;
-  severity: 'critical' | 'warning' | 'info';
+  severity: 'critical' | 'high' | 'warning' | 'info';
   title: string;
   explanation: string;
   text_excerpt?: string;
   matched_rule_id?: string;
+  matched_rule_code?: string;
   matched_fact_id?: string;
+  matched_fact_key?: string;
   source_citation: string;
   recommended_action: string;
   status: string;
   created_at: string;
+  ocr_confidence?: number;
+  bounding_box?: any;
+  evidence_type?: string;
+  page_number?: number;
+  source_status?: string;
+  enforcement_action?: string;
+  is_blocker?: boolean;
+  suggestion?: CorrectionSuggestion;
+}
+
+export interface CorrectionSuggestion {
+  id: string;
+  finding_id: string;
+  content_item_id: string;
+  content_version_id: string;
+  source_checksum: string;
+  target_type: 'body_text' | 'poster_image' | 'pdf_page';
+  page_number?: number;
+  rule_id?: string;
+  rule_code?: string;
+  fact_id?: string;
+  fact_key?: string;
+  original_text: string;
+  proposed_text?: string;
+  diff_preview?: string;
+  explanation: string;
+  evidence_source: string;
+  correction_type: string;
+  confidence: 'high' | 'medium' | 'manual_review';
+  can_auto_apply: boolean;
+  status: 'pending' | 'accepted' | 'rejected' | 'stale' | 'applied';
+  created_at: string;
+  resolved_at?: string;
+}
+
+export interface CorrectionSuggestionApplyResponse {
+  suggestion: CorrectionSuggestion;
+  content_item_id: string;
+  new_version_num?: number;
+  new_version_id?: string;
+  applied_to_text: boolean;
+  message: string;
 }
 
 export interface GovernanceRun {
@@ -188,6 +260,7 @@ export interface ApprovalSubmission {
   content_item_id: string;
   content_item_title: string;
   brand_name: string;
+  channel?: string;
   content_version_id: string;
   version_num: number;
   body_text: string;
@@ -197,7 +270,22 @@ export interface ApprovalSubmission {
   submission_notes?: string;
   status: 'pending' | 'approved' | 'rejected' | 'changes_requested';
   created_at: string;
+  poster_file_path?: string;
+  poster_asset_id?: string;
+  poster_alt_text?: string;
+  poster_url?: string;
+  is_pdf?: boolean;
+  page_count?: number;
   decisions: ApprovalDecision[];
+  governance_run_id?: string;
+  governance_status?: 'passed' | 'warnings' | 'failed';
+  rules_evaluated_count?: number;
+  facts_evaluated_count?: number;
+  findings_count?: number;
+  critical_findings_count?: number;
+  warning_findings_count?: number;
+  info_findings_count?: number;
+  findings?: GovernanceFinding[];
 }
 
 export interface AuditEvent {
@@ -221,3 +309,125 @@ export interface ImageGovernanceResult {
   findings: string[];
   recommendations: string[];
 }
+
+export interface ReviewerFindingDisposition {
+  id: string;
+  organization_id: string;
+  governance_run_id: string;
+  finding_id: string;
+  rule_id?: string;
+  content_item_id?: string;
+  content_version_id?: string;
+  disposition: 'confirmed_issue' | 'false_positive' | 'guideline_unclear' | 'conflicting_guidelines' | 'insufficient_evidence' | 'other';
+  reviewer_id: string;
+  reviewer_name?: string;
+  explanation: string;
+  created_at: string;
+}
+
+export interface AnalyticsOverview {
+  date_from?: string;
+  date_to?: string;
+  total_runs: number;
+  runs_with_findings_count: number;
+  runs_with_findings_pct: number;
+  clean_runs_count: number;
+  clean_runs_pct: number;
+  total_findings: number;
+  actionable_findings_count: number;
+  actionable_findings_pct: number;
+  successful_checks_count: number;
+  successful_checks_pct: number;
+  unresolved_review_count: number;
+  unresolved_review_pct: number;
+  findings_by_severity: Record<string, number>;
+  findings_by_severity_pct: Record<string, number>;
+  actionable_findings_by_severity: Record<string, number>;
+  actionable_findings_by_severity_pct: Record<string, number>;
+  findings_by_status: Record<string, number>;
+  findings_by_category: Record<string, number>;
+  runs_over_time: Array<{
+    date: string;
+    runs_count: number;
+    findings_count: number;
+    clean_runs_count: number;
+  }>;
+  data_available: boolean;
+}
+
+export interface RepeatedMistakeItem {
+  rule_id: string;
+  rule_code?: string;
+  rule_title: string;
+  rule_type: string;
+  category: string;
+  total_findings: number;
+  actionable_findings_count: number;
+  successful_checks_count: number;
+  unresolved_review_count: number;
+  distinct_content_items_count: number;
+  distinct_versions_count: number;
+  severity_distribution: Record<string, number>;
+  channels_distribution: Record<string, number>;
+  products_distribution: Record<string, number>;
+  recurrent_version_issues_count: number;
+  recurrence_trend: 'increasing' | 'decreasing' | 'stable' | 'insufficient_history';
+  trend_details?: string;
+}
+
+export interface RepeatedMistakesData {
+  date_from?: string;
+  date_to?: string;
+  total_repeated_rules_count: number;
+  items: RepeatedMistakeItem[];
+  data_available: boolean;
+}
+
+export interface AmbiguitySignal {
+  signal_type: 'guideline_unclear' | 'conflicting_guidelines' | 'high_false_positive_rate' | 'warning_override_frequency' | 'insufficient_evidence';
+  title: string;
+  description: string;
+  count: number;
+  event_count?: number;
+  denominator: number;
+  percentage: number;
+  date_range?: string;
+  sample_feedback: string[];
+  evidence_source: 'reviewer_disposition' | 'approval_decision';
+  distinct_content_items_count?: number;
+  distinct_findings_count?: number;
+}
+
+export interface RuleAmbiguityReportItem {
+  rule_id: string;
+  rule_code?: string;
+  rule_title: string;
+  rule_type: string;
+  source_citation?: string;
+  ambiguity_level: 'high' | 'medium' | 'low';
+  ambiguity_score: number;
+  total_dispositions_count: number;
+  total_events_count?: number;
+  dispositions_breakdown: Record<string, number>;
+  effective_dispositions_breakdown?: Record<string, number>;
+  distinct_content_items_count: number;
+  distinct_findings_count: number;
+  evidence_base_size: 'small' | 'moderate' | 'substantial';
+  warning_overrides_count: number;
+  verified_rule_overrides_count: number;
+  content_level_overrides_count: number;
+  override_attribution_notes?: string;
+  signals: AmbiguitySignal[];
+  recommended_action: string;
+}
+
+export interface AmbiguityReportData {
+  date_from?: string;
+  date_to?: string;
+  flagged_rules_count: number;
+  total_reviewed_rules_count: number;
+  criteria_summary: string;
+  rules: RuleAmbiguityReportItem[];
+  data_available: boolean;
+}
+

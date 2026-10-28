@@ -62,3 +62,11 @@ dist/
 # OS
 .DS_Store
 Thumbs.db
+
+# Backups & Scratch Files
+backend/backups/
+backend/scratch/
+backend/reports/
+backend/*.json
+evaluation/
+*.log

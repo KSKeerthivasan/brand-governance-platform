@@ -29,11 +29,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     organizationName: null,
     organizationSlug: null,
     role: null,
+    isDemo: false,
     isAuthenticated: false,
   });
   const [loading, setLoading] = useState(true);
 
-  // Initialize from storage or auto-login with default persona for smooth demo testing
+  // Initialize from storage
   useEffect(() => {
     const init = async () => {
       try {
@@ -51,18 +52,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             organizationName: targetOrg?.organization_name || 'Freshsip Beverage Co.',
             organizationSlug: targetOrg?.organization_slug || 'freshsip',
             role: targetOrg?.role || 'content_creator',
+            isDemo: Boolean(profile.is_demo),
             isAuthenticated: true,
           });
           api.setAuth(savedToken, targetOrg?.organization_id || savedOrgId);
         } else {
-          // Auto-init as Content Creator for effortless first glance
-          await switchPersona('content_creator');
-        }
-      } catch (err) {
-        console.warn('Auth initialization fallback to dev-login:', err);
-        try {
-          await switchPersona('content_creator');
-        } catch {
           setAuthState({
             token: null,
             user: null,
@@ -70,9 +64,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             organizationName: null,
             organizationSlug: null,
             role: null,
+            isDemo: false,
             isAuthenticated: false,
           });
         }
+      } catch (err) {
+        console.warn('Auth initialization error:', err);
+        setAuthState({
+          token: null,
+          user: null,
+          organizationId: null,
+          organizationName: null,
+          organizationSlug: null,
+          role: null,
+          isDemo: false,
+          isAuthenticated: false,
+        });
       } finally {
         setLoading(false);
       }
@@ -92,6 +99,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         organizationName: res.organization_name,
         organizationSlug: res.organization_slug,
         role: res.role,
+        isDemo: Boolean(res.is_demo),
         isAuthenticated: true,
       });
     } finally {
@@ -104,15 +112,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const res = await api.switchOrg(orgId, orgSlug);
       api.setAuth(res.access_token, res.organization_id);
-      setAuthState({
+      setAuthState(prev => ({
+        ...prev,
         token: res.access_token,
         user: res.user,
         organizationId: res.organization_id,
         organizationName: res.organization_name,
         organizationSlug: res.organization_slug,
         role: res.role,
+        isDemo: res.is_demo !== undefined ? Boolean(res.is_demo) : prev.isDemo,
         isAuthenticated: true,
-      });
+      }));
     } finally {
       setLoading(false);
     }
@@ -130,6 +140,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         organizationName: res.organization_name,
         organizationSlug: res.organization_slug,
         role: res.role,
+        isDemo: true,
         isAuthenticated: true,
       });
     } finally {
@@ -157,6 +168,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         organizationName: res.organization_name,
         organizationSlug: res.organization_slug,
         role: res.role,
+        isDemo: Boolean(res.is_demo),
         isAuthenticated: true,
       });
     } finally {
@@ -164,8 +176,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const logout = () => {
-    api.setAuth(null, null);
+  const logout = async () => {
+    try {
+      await api.logout();
+    } catch {}
     setAuthState({
       token: null,
       user: null,
@@ -173,6 +187,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       organizationName: null,
       organizationSlug: null,
       role: null,
+      isDemo: false,
       isAuthenticated: false,
     });
   };

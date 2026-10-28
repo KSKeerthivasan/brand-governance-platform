@@ -1,8 +1,8 @@
 from app.schemas.auth import UserBase, UserCreate, UserLogin, UserOut, Token, TokenData, DevLoginRequest
 from app.schemas.organization import OrganizationBase, OrganizationCreate, OrganizationOut, MembershipCreate, MembershipOut, BrandBase, BrandCreate, BrandOut
 from app.schemas.knowledge import (
-    KnowledgeRuleBase, KnowledgeRuleCreate, KnowledgeRuleReview, KnowledgeRuleOut,
-    KnowledgeFactBase, KnowledgeFactCreate, KnowledgeFactReview, KnowledgeFactOut,
+    KnowledgeRuleBase, KnowledgeRuleCreate, KnowledgeRuleReview, KnowledgeRuleOut, KnowledgeRuleUpdate,
+    KnowledgeFactBase, KnowledgeFactCreate, KnowledgeFactReview, KnowledgeFactOut, KnowledgeFactUpdate,
     BrandAssetBase, BrandAssetReview, BrandAssetOut,
     KnowledgeSourceOut
 )
@@ -13,6 +13,11 @@ from app.schemas.governance import (
 )
 from app.schemas.approval import ApprovalSubmissionCreate, ApprovalSubmissionOut, ApprovalDecisionCreate, ApprovalDecisionOut
 from app.schemas.audit import AuditEventOut
+from app.schemas.analytics import (
+    ReviewerFindingDispositionCreate, ReviewerFindingDispositionOut,
+    AnalyticsOverviewOut, RepeatedMistakeItem, RepeatedMistakesOut,
+    AmbiguitySignal, RuleAmbiguityReportItem, AmbiguityReportOut
+)
 
 __all__ = [
     "UserBase", "UserCreate", "UserLogin", "UserOut", "Token", "TokenData", "DevLoginRequest",
@@ -24,4 +29,7 @@ __all__ = [
     "GovernanceRunRequest", "GovernanceRunOut", "GovernanceFindingOut", "ImageGovernanceCheckRequest", "ImageGovernanceCheckResult",
     "ApprovalSubmissionCreate", "ApprovalSubmissionOut", "ApprovalDecisionCreate", "ApprovalDecisionOut",
     "AuditEventOut",
+    "ReviewerFindingDispositionCreate", "ReviewerFindingDispositionOut",
+    "AnalyticsOverviewOut", "RepeatedMistakeItem", "RepeatedMistakesOut",
+    "AmbiguitySignal", "RuleAmbiguityReportItem", "AmbiguityReportOut"
 ]

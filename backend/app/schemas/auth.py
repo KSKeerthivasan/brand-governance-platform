@@ -38,9 +38,11 @@ class Token(BaseModel):
     organization_name: str
     organization_slug: str
     role: str
+    is_demo: bool = False
 
 class TokenData(BaseModel):
     user_id: Optional[str] = None
     email: Optional[str] = None
     organization_id: Optional[str] = None
     role: Optional[str] = None
+    is_demo: Optional[bool] = None

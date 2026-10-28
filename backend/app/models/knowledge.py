@@ -46,14 +46,31 @@ class KnowledgeRule(Base):
     brand_id = Column(String(36), ForeignKey("brands.id", ondelete="SET NULL"), nullable=True, index=True)
     source_id = Column(String(36), ForeignKey("knowledge_sources.id", ondelete="SET NULL"), nullable=True, index=True)
     
-    rule_type = Column(String(50), nullable=False)  # prohibited_word, required_term, tone_guideline, claim_policy, image_standard
+    rule_type = Column(String(50), nullable=False)  # prohibited_word, required_term, tone_guideline, claim_policy, image_standard, asset_policy
     title = Column(String(255), nullable=False)
     pattern = Column(String(500), nullable=False)  # text pattern or keyword to check
     explanation = Column(Text, nullable=False)
-    severity = Column(String(20), default="warning", nullable=False)  # critical, warning, info
+    severity = Column(String(20), default="warning", nullable=False)  # critical, high, warning/medium, low, info
     context_condition = Column(String(255), nullable=True)  # optional context sensitive trigger
+    scope = Column(String(255), default="all_channels", nullable=True)  # all_channels, social_posts, packaging, etc.
     source_citation = Column(String(255), nullable=True)  # e.g., "Brand Guidelines PDF, Section 3.1, p. 5"
     
+    # Extended Stage 2 Structured Extraction Fields
+    rule_code = Column(String(50), nullable=True, index=True)  # e.g. "FR-RULE-001"
+    source_status = Column(String(50), default="unknown", nullable=True)  # approved, pending_review, expired, rejected
+    enforcement_action = Column(String(50), default="flag_for_review", nullable=True)  # block, flag_for_review, escalate_to_human, warn
+    rationale = Column(Text, nullable=True)
+    recommended_alternatives = Column(Text, nullable=True)  # JSON or text list of preferred phrasing
+    exceptions = Column(Text, nullable=True)  # JSON or text list of contextual exceptions
+    examples_bad = Column(Text, nullable=True)  # JSON or text list of violation examples
+    examples_good = Column(Text, nullable=True)  # JSON or text list of compliant examples
+    evidence_passage = Column(Text, nullable=True)  # Exact supporting quotation
+    page_number = Column(Integer, nullable=True)  # Primary source page
+    evidence_validation = Column(String(50), default="unverified", nullable=True)  # verified_exact, verified_fuzzy, page_mismatch, unverified
+    uncertainty_notes = Column(Text, nullable=True)  # Human review notes, ambiguity, data gaps
+    original_extraction = Column(Text, nullable=True)  # JSON snapshot of machine extraction
+    is_corrected = Column(Boolean, default=False, nullable=False)  # True if reviewer edited prior to approval
+
     status = Column(String(50), default="pending_review", nullable=False)  # pending_review, approved, rejected, deprecated
     reviewed_by = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     reviewed_at = Column(DateTime, nullable=True)
@@ -81,6 +98,17 @@ class KnowledgeFact(Base):
     fact_key = Column(String(255), nullable=False)  # e.g. "sugar_content", "organic_certified", "caffeine"
     fact_value = Column(String(500), nullable=False)  # e.g. "0g added sugar", "USDA Organic", "45mg natural caffeine"
     
+    # Extended Stage 2 Structured Extraction Fields
+    product_id = Column(String(50), nullable=True, index=True)  # e.g. "FS-PROD-001"
+    unit = Column(String(50), nullable=True)  # e.g. "mL", "g", "kcal", "%", "INR"
+    value_status = Column(String(50), default="explicitly_stated", nullable=True)  # explicitly_stated, missing_not_provided, external_reference_needed
+    source_status = Column(String(50), default="approved", nullable=True)  # approved, pending_review, expired, rejected
+    page_number = Column(Integer, nullable=True)  # Primary source page
+    evidence_validation = Column(String(50), default="unverified", nullable=True)  # verified_exact, verified_fuzzy, page_mismatch, unverified
+    uncertainty_notes = Column(Text, nullable=True)  # Data gap or ambiguity notes
+    original_extraction = Column(Text, nullable=True)  # JSON snapshot of machine extraction
+    is_corrected = Column(Boolean, default=False, nullable=False)  # True if reviewer edited prior to approval
+
     supporting_evidence = Column(Text, nullable=True)
     source_citation = Column(String(255), nullable=True)  # e.g. "Product Knowledge PDF, p. 2"
     

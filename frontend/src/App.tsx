@@ -44,6 +44,7 @@ export const App: React.FC = () => {
           >
             <Route index element={<Dashboard />} />
             <Route path="knowledge" element={<KnowledgeLibrary />} />
+            <Route path="brand-assets" element={<Navigate to="/knowledge?tab=assets" replace />} />
             <Route path="content" element={<ContentStudio />} />
             <Route path="approvals" element={<ApprovalQueue />} />
             <Route path="image-governance" element={<ImageGovernance />} />

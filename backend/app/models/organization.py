@@ -33,6 +33,7 @@ class User(Base):
 
     memberships = relationship("OrganizationMembership", back_populates="user", cascade="all, delete-orphan")
     content_created = relationship("ContentItem", back_populates="creator")
+    revoked_tokens = relationship("RevokedToken", back_populates="user", cascade="all, delete-orphan")
 
 
 class OrganizationRole:
@@ -58,3 +59,17 @@ class OrganizationMembership(Base):
     __table_args__ = (
         UniqueConstraint("organization_id", "user_id", name="uq_org_user"),
     )
+
+
+class RevokedToken(Base):
+    __tablename__ = "revoked_tokens"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    jti = Column(String(64), unique=True, nullable=False, index=True)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    revoked_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    reason = Column(String(100), nullable=True)
+
+    user = relationship("User", back_populates="revoked_tokens")
+

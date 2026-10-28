@@ -53,6 +53,12 @@ def test_editing_submitted_content_resets_status_and_creates_new_version(client,
     content_id = res1.json()["id"]
     v1_id = res1.json()["latest_version"]["id"]
 
+    # Run governance check first
+    res_gov = client.post("/api/v1/governance/run", headers=creator_headers, json={
+        "content_version_id": v1_id
+    })
+    assert res_gov.status_code == 200
+
     # Submit for approval
     res_sub = client.post("/api/v1/approvals/submit", headers=creator_headers, json={
         "content_item_id": content_id,

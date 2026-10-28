@@ -1,7 +1,7 @@
 import uuid
 import hashlib
 from datetime import datetime
-from sqlalchemy import Column, String, Text, Integer, DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, String, Text, Integer, Boolean, DateTime, ForeignKey, Index, UniqueConstraint
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -46,7 +46,12 @@ class ContentVersion(Base):
     created_by = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
+    poster_file_path = Column(String(500), nullable=True)
+    poster_asset_id = Column(String(36), ForeignKey("brand_assets.id", ondelete="SET NULL"), nullable=True)
+    poster_alt_text = Column(Text, nullable=True)
+
     content_item = relationship("ContentItem", back_populates="versions")
+    poster_asset = relationship("BrandAsset", foreign_keys=[poster_asset_id])
     governance_runs = relationship("GovernanceRun", back_populates="content_version", cascade="all, delete-orphan")
     submissions = relationship("ApprovalSubmission", back_populates="content_version")
     decisions = relationship("ApprovalDecision", back_populates="content_version")
@@ -56,8 +61,32 @@ class ContentVersion(Base):
     )
 
     @staticmethod
-    def calculate_checksum(text: str) -> str:
-        return hashlib.sha256(text.encode("utf-8")).hexdigest()
+    def calculate_checksum(text: str, poster_file_path: str | None = None) -> str:
+        hasher = hashlib.sha256()
+        hasher.update(text.encode("utf-8"))
+        if poster_file_path:
+            import os
+            resolved_path = None
+            try:
+                from app.services.storage import storage_service
+                if storage_service.check_exists(poster_file_path):
+                    resolved_path = storage_service.get_file_path_for_processing(poster_file_path)
+            except Exception:
+                pass
+
+            if not resolved_path and os.path.exists(poster_file_path):
+                resolved_path = poster_file_path
+
+            if resolved_path and os.path.exists(resolved_path):
+                try:
+                    with open(resolved_path, "rb") as f:
+                        while chunk := f.read(65536):
+                            hasher.update(chunk)
+                except Exception:
+                    hasher.update(poster_file_path.encode("utf-8"))
+            else:
+                hasher.update(poster_file_path.encode("utf-8"))
+        return hasher.hexdigest()
 
 
 class GovernanceRun(Base):
@@ -88,6 +117,7 @@ class GovernanceFinding(Base):
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     governance_run_id = Column(String(36), ForeignKey("governance_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    page_number = Column(Integer, nullable=True)  # 1-indexed for multi-page PDF pages, None for body text
     
     category = Column(String(50), nullable=False)  
     # prohibited_wording, product_fact_mismatch, unsupported_claim, claim_status_issue, mandatory_wording_missing, source_freshness_issue, missing_evidence, image_guideline_issue
@@ -109,6 +139,8 @@ class GovernanceFinding(Base):
     governance_run = relationship("GovernanceRun", back_populates="findings")
     matched_rule = relationship("KnowledgeRule")
     matched_fact = relationship("KnowledgeFact")
+    dispositions = relationship("ReviewerFindingDisposition", back_populates="finding", cascade="all, delete-orphan")
+    suggestion = relationship("CorrectionSuggestion", back_populates="finding", uselist=False, cascade="all, delete-orphan")
 
 
 class ApprovalSubmission(Base):
@@ -152,3 +184,76 @@ class ApprovalDecision(Base):
     submission = relationship("ApprovalSubmission", back_populates="decisions")
     content_version = relationship("ContentVersion", back_populates="decisions")
     decider = relationship("User")
+
+
+class ReviewerFindingDisposition(Base):
+    """
+    Evidence-based reviewer feedback tied to a specific governance finding and rule.
+    Captures whether findings represent confirmed issues, false positives, unclear guidelines,
+    or conflicting rules to drive knowledge improvement.
+    """
+    __tablename__ = "reviewer_finding_dispositions"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    organization_id = Column(String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    governance_run_id = Column(String(36), ForeignKey("governance_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    finding_id = Column(String(36), ForeignKey("governance_findings.id", ondelete="CASCADE"), nullable=False, index=True)
+    rule_id = Column(String(36), ForeignKey("knowledge_rules.id", ondelete="SET NULL"), nullable=True, index=True)
+    content_item_id = Column(String(36), ForeignKey("content_items.id", ondelete="SET NULL"), nullable=True, index=True)
+    content_version_id = Column(String(36), ForeignKey("content_versions.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    disposition = Column(String(50), nullable=False)  # confirmed_issue, false_positive, guideline_unclear, conflicting_guidelines, insufficient_evidence, other
+    reviewer_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    explanation = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    organization = relationship("Organization")
+    governance_run = relationship("GovernanceRun")
+    finding = relationship("GovernanceFinding", back_populates="dispositions")
+    rule = relationship("KnowledgeRule")
+    reviewer = relationship("User")
+
+
+class CorrectionSuggestion(Base):
+    """
+    Context-preserving correction suggestion linked to a specific finding and evaluated content version.
+    Stores original passage, proposed correction, explanation, evidence citations,
+    and applicability boundaries (body text vs non-editable artwork).
+    """
+    __tablename__ = "correction_suggestions"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    finding_id = Column(String(36), ForeignKey("governance_findings.id", ondelete="CASCADE"), nullable=False, index=True)
+    content_item_id = Column(String(36), ForeignKey("content_items.id", ondelete="CASCADE"), nullable=False, index=True)
+    content_version_id = Column(String(36), ForeignKey("content_versions.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_checksum = Column(String(64), nullable=False)
+    
+    target_type = Column(String(50), nullable=False)  # body_text, poster_image, pdf_page
+    page_number = Column(Integer, nullable=True)  # 1-indexed for PDF pages
+    
+    rule_id = Column(String(36), ForeignKey("knowledge_rules.id", ondelete="SET NULL"), nullable=True, index=True)
+    rule_code = Column(String(50), nullable=True)
+    fact_id = Column(String(36), ForeignKey("knowledge_facts.id", ondelete="SET NULL"), nullable=True, index=True)
+    fact_key = Column(String(100), nullable=True)
+
+    original_text = Column(Text, nullable=False)
+    proposed_text = Column(Text, nullable=True)
+    diff_preview = Column(Text, nullable=True)
+    explanation = Column(Text, nullable=False)
+    evidence_source = Column(String(255), nullable=False)
+    
+    correction_type = Column(String(50), nullable=False)  # deterministic_replacement, mandatory_disclosure_insertion, factual_correction, tone_refinement, visual_remediation, manual_guidance
+    confidence = Column(String(20), default="high", nullable=False)  # high, medium, manual_review
+    can_auto_apply = Column(Boolean, default=False, nullable=False)
+    status = Column(String(50), default="pending", nullable=False)  # pending, accepted, rejected, stale, applied
+    
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    resolved_at = Column(DateTime, nullable=True)
+
+    finding = relationship("GovernanceFinding", back_populates="suggestion")
+    content_item = relationship("ContentItem")
+    content_version = relationship("ContentVersion")
+    rule = relationship("KnowledgeRule")
+    fact = relationship("KnowledgeFact")
+
+

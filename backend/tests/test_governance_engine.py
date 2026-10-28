@@ -13,7 +13,7 @@ def test_governance_detects_prohibited_words_and_citations(client, auth_tokens):
         "brand_id": brand_id,
         "title": "Prohibited Test Draft",
         "channel": "Social Media",
-        "body_text": "This beverage is a miracle cure for dehydration! USDA Certified Organic and Zero Added Sugar."
+        "body_text": "This beverage is a miracle cure for dehydration! Refreshing and natural."
     })
     assert res_draft.status_code == 200
     draft_data = res_draft.json()
@@ -46,7 +46,7 @@ def test_governance_detects_unsupported_health_claims(client, auth_tokens):
         "brand_id": brand_id,
         "title": "Unsupported Health Claim Draft",
         "channel": "Website Banner",
-        "body_text": "Freshsip treats cancer and guarantees rapid weight loss! Zero Added Sugar. USDA Certified Organic."
+        "body_text": "Freshsip treats cancer and guarantees rapid weight loss! Pure fruit juice."
     })
     version_id = res_draft.json()["latest_version"]["id"]
 
@@ -67,12 +67,12 @@ def test_governance_detects_product_fact_mismatch(client, auth_tokens):
     res_b = client.get("/api/v1/brands", headers=headers)
     brand_id = res_b.json()[0]["id"]
 
-    # Approved fact says 0g added sugar. Mention 30g sugar.
+    # Approved fact says 0g added sugar. Mention 30g sugar for Valencia Orange Cold-Pressed Juice.
     res_draft = client.post("/api/v1/content", headers=headers, json={
         "brand_id": brand_id,
         "title": "Sugar Mismatch Draft",
         "channel": "Social Media",
-        "body_text": "Freshsip Sparkling Citrus contains 30g sugar! Zero Added Sugar. USDA Certified Organic."
+        "body_text": "Freshsip Valencia Orange Cold-Pressed Juice contains 30g sugar! Sweet and energizing."
     })
     version_id = res_draft.json()["latest_version"]["id"]
 
@@ -82,7 +82,7 @@ def test_governance_detects_product_fact_mismatch(client, auth_tokens):
     assert res_gov.status_code == 200
     mismatch = [f for f in res_gov.json()["findings"] if f["category"] == "product_fact_mismatch"]
     assert len(mismatch) >= 1
-    assert "0g added sugar" in mismatch[0]["explanation"]
+    assert "no added sugar" in mismatch[0]["explanation"].lower() or "0g" in mismatch[0]["explanation"].lower()
 
 def test_compliant_content_passes_governance(client, auth_tokens):
     headers = auth_tokens["content_creator"]["headers"]
@@ -94,7 +94,7 @@ def test_compliant_content_passes_governance(client, auth_tokens):
         "brand_id": brand_id,
         "title": "Compliant Freshsip Post",
         "channel": "Social Media",
-        "body_text": "Experience crisp botanical refreshment with Freshsip Sparkling Citrus! Formulated with Zero Added Sugar and USDA Certified Organic citrus essences."
+        "body_text": "Experience crisp refreshment with Freshsip Valencia Orange Cold-Pressed Juice! Crafted from 100% Valencia orange juice with no added sugar."
     })
     version_id = res_draft.json()["latest_version"]["id"]
 

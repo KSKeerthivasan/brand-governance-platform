@@ -3,6 +3,7 @@ import { Users, UserPlus, Shield, ShieldAlert, Check } from 'lucide-react';
 import { api } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { Member } from '../types';
+import { useAutoRefresh } from '../hooks/useAutoRefresh';
 
 export const TeamManagement: React.FC = () => {
   const { role, organizationName } = useAuth();
@@ -17,21 +18,27 @@ export const TeamManagement: React.FC = () => {
 
   const isAdmin = role === 'org_admin';
 
-  const loadMembers = async () => {
+  const loadMembers = async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const list = await api.getMembers();
       setMembers(list);
     } catch (err) {
       console.error('Failed to load members:', err);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadMembers();
+    loadMembers(false);
   }, []);
+
+  useAutoRefresh(() => {
+    if (!submitting) {
+      loadMembers(true);
+    }
+  }, { intervalMs: 6000 });
 
   const handleAddMember = async (e: React.FormEvent) => {
     e.preventDefault();

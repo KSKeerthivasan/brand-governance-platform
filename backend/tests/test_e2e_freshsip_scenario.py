@@ -52,7 +52,7 @@ def test_full_e2e_freshsip_governance_journey(client, auth_tokens):
     # Step 3: Creator creates draft containing unsupported claim & prohibited word
     # -------------------------------------------------------------
     initial_text = (
-        "Freshsip Sparkling Citrus is a miracle elixir that cures chronic illness! "
+        "Freshsip Valencia Orange Cold-Pressed Juice is a miracle elixir that cures chronic illness! "
         "Contains 30g sugar and guarantees rapid fat burning results."
     )
     res_draft = client.post("/api/v1/content", headers=creator_h, json={
@@ -95,9 +95,9 @@ def test_full_e2e_freshsip_governance_journey(client, auth_tokens):
     # Step 6 & 7: Revise the content -> Creates v2 and rerun checks
     # -------------------------------------------------------------
     revised_compliant_text = (
-        "Energize your afternoon with Freshsip Sparkling Citrus! "
-        "Crafted with crisp botanicals, Zero Added Sugar, and 45mg green tea caffeine. "
-        "USDA Certified Organic and naturally refreshing."
+        "Energize your afternoon with Freshsip Valencia Orange Cold-Pressed Juice! "
+        "Crafted from 100% pressed Valencia oranges and High-Pressure Processed (HPP) with no added sugar. "
+        "Packaged in a 250 mL glass bottle at MRP ₹120."
     )
     res_edit = client.put(f"/api/v1/content/{content_id}", headers=creator_h, json={
         "body_text": revised_compliant_text

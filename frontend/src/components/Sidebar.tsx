@@ -17,13 +17,13 @@ export const Sidebar: React.FC = () => {
   const { role, organizationName } = useAuth();
 
   const links = [
-    { to: '/', label: 'Dashboard', icon: LayoutDashboard },
-    { to: '/knowledge', label: 'Knowledge Library', icon: BookOpen },
-    { to: '/content', label: 'Content Studio', icon: FileEdit },
-    { to: '/approvals', label: 'Approval Queue', icon: CheckSquare },
-    { to: '/image-governance', label: 'Image Governance', icon: ImageIcon },
-    { to: '/audit', label: 'Audit History', icon: History },
-    { to: '/team', label: 'Team & Roles', icon: Users },
+    { to: '/', label: 'Dashboard', icon: LayoutDashboard, id: 'sidebar-nav-dashboard' },
+    { to: '/knowledge', label: 'Knowledge Library', icon: BookOpen, id: 'sidebar-nav-knowledge' },
+    { to: '/content', label: 'Content Studio', icon: FileEdit, id: 'sidebar-nav-content' },
+    { to: '/approvals', label: 'Approval Queue', icon: CheckSquare, id: 'sidebar-nav-approvals' },
+    { to: '/image-governance', label: 'Image Governance', icon: ImageIcon, id: 'sidebar-nav-image-gov' },
+    { to: '/audit', label: 'Audit History', icon: History, id: 'sidebar-nav-audit' },
+    { to: '/team', label: 'Team & Roles', icon: Users, id: 'sidebar-nav-team' },
   ];
 
   const formatRole = (r: string | null) => {
@@ -80,6 +80,7 @@ export const Sidebar: React.FC = () => {
           return (
             <NavLink
               key={link.to}
+              id={link.id}
               to={link.to}
               end={link.to === '/'}
               style={({ isActive }) => ({

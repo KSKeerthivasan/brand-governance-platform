@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { History, Filter, Search, Shield, User, Calendar } from 'lucide-react';
 import { api } from '../services/api';
 import { AuditEvent } from '../types';
+import { useAutoRefresh } from '../hooks/useAutoRefresh';
 
 export const AuditHistory: React.FC = () => {
   const [events, setEvents] = useState<AuditEvent[]>([]);
@@ -9,21 +10,23 @@ export const AuditHistory: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
 
-  const loadAuditEvents = async () => {
+  const loadAuditEvents = async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const evs = await api.getAuditEvents(100, filterType === 'all' ? undefined : filterType);
       setEvents(evs);
     } catch (err) {
       console.error('Failed to load audit events:', err);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadAuditEvents();
+    loadAuditEvents(false);
   }, [filterType]);
+
+  useAutoRefresh(() => loadAuditEvents(true), { intervalMs: 6000 });
 
   const filteredEvents = events.filter(e => {
     if (!searchTerm) return true;

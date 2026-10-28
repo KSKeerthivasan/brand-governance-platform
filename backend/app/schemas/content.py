@@ -10,6 +10,12 @@ class ContentVersionOut(BaseModel):
     checksum: str
     created_by: Optional[str] = None
     created_at: datetime
+    poster_file_path: Optional[str] = None
+    poster_asset_id: Optional[str] = None
+    poster_alt_text: Optional[str] = None
+    poster_url: Optional[str] = None
+    is_pdf: bool = False
+    page_count: Optional[int] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -18,11 +24,17 @@ class ContentItemCreate(BaseModel):
     title: str
     channel: str = "Social Media"
     body_text: str
+    poster_file_path: Optional[str] = None
+    poster_asset_id: Optional[str] = None
+    poster_alt_text: Optional[str] = None
 
 class ContentItemUpdate(BaseModel):
     title: Optional[str] = None
     channel: Optional[str] = None
     body_text: str
+    poster_file_path: Optional[str] = None
+    poster_asset_id: Optional[str] = None
+    poster_alt_text: Optional[str] = None
 
 class ContentItemOut(BaseModel):
     id: str

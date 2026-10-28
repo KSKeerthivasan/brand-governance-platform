@@ -15,12 +15,19 @@ def test_creator_cannot_approve_own_content(client, auth_tokens):
     content_id = res_draft.json()["id"]
     version_id = res_draft.json()["latest_version"]["id"]
 
+    # Run governance first to satisfy fail-closed precondition
+    res_gov = client.post("/api/v1/governance/run", headers=creator_headers, json={
+        "content_version_id": version_id
+    })
+    assert res_gov.status_code == 200
+
     # Submit
     res_sub = client.post("/api/v1/approvals/submit", headers=creator_headers, json={
         "content_item_id": content_id,
         "content_version_id": version_id,
         "submission_notes": "Attempting self approval test."
     })
+    assert res_sub.status_code == 200
     sub_id = res_sub.json()["id"]
 
     # Creator attempts to approve their own content -> Must be rejected with 403 Forbidden!
@@ -47,12 +54,19 @@ def test_approval_manager_approves_submission_with_official_label(client, auth_t
     content_id = res_draft.json()["id"]
     version_id = res_draft.json()["latest_version"]["id"]
 
+    # Run governance first to satisfy fail-closed precondition
+    res_gov = client.post("/api/v1/governance/run", headers=creator_headers, json={
+        "content_version_id": version_id
+    })
+    assert res_gov.status_code == 200
+
     # Submit
     res_sub = client.post("/api/v1/approvals/submit", headers=creator_headers, json={
         "content_item_id": content_id,
         "content_version_id": version_id,
         "submission_notes": "Ready for manager sign-off."
     })
+    assert res_sub.status_code == 200
     sub_id = res_sub.json()["id"]
 
     # Manager approves

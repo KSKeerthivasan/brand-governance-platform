@@ -44,9 +44,6 @@ export const Onboarding: React.FC = () => {
         .replace(/^-+|-+$/g, '');
       setOrgSlug(generated);
     }
-    if (!brandName) {
-      setBrandName(val);
-    }
   };
 
   const handleSlugChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -80,7 +77,7 @@ export const Onboarding: React.FC = () => {
         admin_password: adminPassword
       });
 
-      // Navigate directly into the newly created organization workspace
+      // Navigate directly into the organization workspace
       navigate('/');
     } catch (err: any) {
       setError(err.message || 'Failed to create organization. Please verify your details.');
@@ -245,6 +242,25 @@ export const Onboarding: React.FC = () => {
                     onChange={(e) => setBrandDesc(e.target.value)}
                     className="input"
                   />
+                </div>
+              </div>
+
+              {/* Onboarding Requirements Preview */}
+              <div style={{
+                marginTop: 14,
+                padding: '12px 16px',
+                borderRadius: 8,
+                background: 'rgba(99, 102, 241, 0.08)',
+                border: '1px solid rgba(99, 102, 241, 0.22)',
+                fontSize: '0.8rem',
+                color: '#c7d2fe',
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 10
+              }}>
+                <Sparkles size={16} color="#818cf8" style={{ flexShrink: 0, marginTop: 2 }} />
+                <div>
+                  <strong>Next step after workspace creation:</strong> You will provide two required assets in the Knowledge Library: <strong>1. One brand guidelines PDF</strong> and <strong>2. One official brand logo</strong>. Product catalogues, nutritional tables, and reference assets are optional and only needed for specific checks.
                 </div>
               </div>
             </div>

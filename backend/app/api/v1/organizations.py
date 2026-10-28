@@ -120,7 +120,8 @@ def onboard_organization(
             "sub": user.id,
             "email": user.email,
             "org_id": org.id,
-            "role": OrganizationRole.ORG_ADMIN
+            "role": OrganizationRole.ORG_ADMIN,
+            "is_demo": False
         }
     )
 
@@ -131,7 +132,8 @@ def onboard_organization(
         organization_id=org.id,
         organization_name=org.name,
         organization_slug=org.slug,
-        role=OrganizationRole.ORG_ADMIN
+        role=OrganizationRole.ORG_ADMIN,
+        is_demo=False
     )
 
 @router.get("/current", response_model=OrganizationOut)
