@@ -374,6 +374,8 @@ export const KnowledgeLibrary: React.FC = () => {
 
         await api.uploadKnowledge(logoData);
         successItems.push(`Official Brand Logo ('${logoFile.name}') uploaded as reference asset.`);
+        setLogoFile(null);
+        setLogoPreviewUrl(null);
       }
 
       // 2. Upload Guidelines PDF if provided

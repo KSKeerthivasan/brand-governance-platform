@@ -387,7 +387,16 @@ class SupabaseStorageBackend(StorageBackend):
         tmp_cache = f"{cache_path}.tmp_{uuid.uuid4().hex[:6]}"
         with open(tmp_cache, "wb") as cf:
             cf.write(file_bytes)
-        os.replace(tmp_cache, cache_path)
+        try:
+            os.replace(tmp_cache, cache_path)
+        except OSError:
+            try:
+                with open(cache_path, "wb") as cf:
+                    cf.write(file_bytes)
+                if os.path.exists(tmp_cache):
+                    os.remove(tmp_cache)
+            except Exception:
+                pass
 
         return object_key, bytes_written
 
@@ -453,7 +462,16 @@ class SupabaseStorageBackend(StorageBackend):
             tmp_cache = f"{cache_path}.tmp_{uuid.uuid4().hex[:6]}"
             with open(tmp_cache, "wb") as f:
                 f.write(data)
-            os.replace(tmp_cache, cache_path)
+            try:
+                os.replace(tmp_cache, cache_path)
+            except OSError:
+                try:
+                    with open(cache_path, "wb") as f:
+                        f.write(data)
+                    if os.path.exists(tmp_cache):
+                        os.remove(tmp_cache)
+                except Exception:
+                    pass
 
             return data
 

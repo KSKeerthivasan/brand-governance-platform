@@ -136,7 +136,7 @@ def run_gemini_pdf_extraction(
         "model": model_name
     }
 
-    client = genai.Client(api_key=api_key)
+    client = genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=25000))
     uploaded_file = None
 
     try:
@@ -191,8 +191,8 @@ def run_gemini_pdf_extraction(
                 # Bounded retry: ONLY for transient 503 UNAVAILABLE on the first attempt
                 if err_category == "transient_503" and attempt < MAX_GENERATION_ATTEMPTS:
                     timing_metrics["retry_count"] += 1
-                    # Short exponential backoff with jitter (4.0s base + 1.0 to 3.0s jitter)
-                    backoff_sec = 4.0 + random.uniform(1.0, 3.0)
+                    # Bounded backoff with jitter (2.0s base + 0.5 to 1.5s jitter)
+                    backoff_sec = 2.0 + random.uniform(0.5, 1.5)
                     logger.warning(
                         f"Gemini generation attempt {attempt} encountered 503 UNAVAILABLE after {attempt_ms}ms. "
                         f"Backing off with jitter for {backoff_sec:.2f}s before bounded retry 1/1..."

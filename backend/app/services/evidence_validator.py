@@ -18,12 +18,13 @@ def extract_pdf_pages(file_path: str) -> List[str]:
     Returns a list of strings where index 0 is Page 1.
     """
     try:
-        reader = PdfReader(file_path)
-        pages = []
-        for p in reader.pages:
-            txt = p.extract_text() or ""
-            pages.append(txt)
-        return pages
+        with open(file_path, "rb") as f:
+            reader = PdfReader(f)
+            pages = []
+            for p in reader.pages:
+                txt = p.extract_text() or ""
+                pages.append(txt)
+            return pages
     except Exception as e:
         return [f"[Error reading page: {e}]"]
 
