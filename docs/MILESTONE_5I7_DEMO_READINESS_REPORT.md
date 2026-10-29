@@ -7,7 +7,7 @@
 **Database:** Supabase Managed PostgreSQL (`db.qwvqifqnyurlqewkrsiw.supabase.co`)  
 **Object Storage:** Supabase Storage Private Bucket (`inkloom-private-assets`)  
 **Audit Date:** October 29, 2026  
-**Final Milestone Status:** `DEMO READY WITH DOCUMENTED LIMITATIONS`
+**Final Milestone Status:** `DEMO ACCESS RESTORED — HOSTED TESTS PASSED`
 
 ---
 
@@ -152,11 +152,42 @@ The platform includes four pre-seeded demonstration personas for the `Freshsip B
 | **Rachel Reviewer** | Knowledge Reviewer | `reviewer@freshsip.demo` | `Freshsip2026!` | Uploading brand guidelines PDFs, extracting rules, reviewing facts. |
 | **Marcus Manager** | Approval Manager | `approver@freshsip.demo` | `Freshsip2026!` | Evaluating submissions in Approval Queue, approving/rejecting drafts. |
 
+### 7.1 Historical Persona Access Discrepancy & Resolution
+
+#### Discrepancy Investigation
+An earlier revision of this audit report recorded that the login page rendered persona cards. However, subsequent testing revealed that visitors on the deployed site could not use one-click persona access. A multi-layer diagnostic identified three root causes:
+1. **Bypass Endpoint Misalignment:** `handleQuickPersona` in `frontend/src/pages/Login.tsx` previously relied on `switchPersona()`, which routed through `api.devLogin()` (`POST /api/v1/auth/dev-login`). In production on Render, `ALLOW_DEV_LOGIN=False` is strictly enforced for security, returning `HTTP 403 Forbidden ("Development login bypass is disabled in this environment")`.
+2. **Missing HTML Cache Invalidation in Firebase:** `firebase.json` lacked explicit `Cache-Control` directives for `**/*.html`. Client browsers and Firebase edge caches served stale HTML entrypoints pointing to earlier bundles.
+3. **Responsive Card Overflow:** On certain viewport dimensions, rigid grid rules compressed cards below legible breakpoints.
+
+#### Technical Resolution (Commit `9e3b239`)
+- **Standard Authentication Flow:** Rewired `handleQuickPersona` and `switchPersona` to authenticate directly through the normal production endpoint `POST /api/v1/auth/login` using the public seeded demo credentials (`Freshsip2026!`) and organization slug (`freshsip`).
+- **Production Security Integrity:** `ALLOW_DEV_LOGIN=False` remains untouched on Render. No bypass routes or arbitrary JWT minting mechanisms were introduced; every persona login generates a cryptographically signed JWT via standard bcrypt verification and database user lookups.
+- **Cache-Control Configuration:** Added headers in `firebase.json`:
+  ```json
+  "headers": [
+    {
+      "source": "**/*.html",
+      "headers": [{ "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }]
+    },
+    {
+      "source": "/assets/**",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
+    }
+  ]
+  ```
+- **Judge Experience & Cold-Start Notice:**
+  - One-click trigger automatically initiates login without requiring secondary button clicks.
+  - Added pending state indicator (`Authenticating as {persona}...`) and disabled button interactions during in-flight requests to prevent duplicate submissions.
+  - Added a 3.5-second timer warning visitors if the Render backend container is waking from a cold start.
+  - Displayed explicit notice that demo accounts operate within synthetic demonstration data.
+  - Added responsive CSS grid (`repeat(auto-fit, minmax(340px, 1fr))`) ensuring proper layout across mobile and desktop.
+
 ---
 
 ## 8. Final Audit Conclusion
 
 The Inkloom.AI platform meets all criteria for demonstration, evaluation, and review:
-- **Status:** **`DEMO READY WITH DOCUMENTED LIMITATIONS`**
-- **Hosting URL:** [`https://ad-governance.web.app`](https://ad-governance.web.app)
+- **Status:** **`DEMO ACCESS RESTORED — HOSTED TESTS PASSED`**
+- **Hosting URL:** [`https://ad-governance.web.app/login`](https://ad-governance.web.app/login)
 - **API URL:** [`https://inkloom-backend-6k9u.onrender.com`](https://inkloom-backend-6k9u.onrender.com)
