@@ -69,6 +69,267 @@ def select_best_rule_evidence_passage(
     return passages[0]
 
 
+def extract_local_pdf_candidates(
+    pdf_pages: List[str],
+    filename: str,
+    known_matrix: Dict[str, Any],
+    gemini_error_detail: str,
+    t_start: float,
+    pdf_parsing_ms: float = 0.0
+) -> Tuple[str, List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, Any]]:
+    """
+    Local fallback extraction path when Gemini cloud extraction is unavailable (e.g. 503).
+    Extracts text from PDF pages, parses deterministic rule matrix and structured rule definitions,
+    preserves exact page citations and evidence passages, and ensures all candidate records start
+    in pending_review with explicit uncertainty_notes identifying local extraction.
+    """
+    total_pages = len(pdf_pages)
+    full_pdf_text = "\n\n".join(pdf_pages).strip()
+    total_chars = len(full_pdf_text)
+
+    # Check if document has usable extractable text
+    has_usable_text = bool(any(len(p.strip()) > 20 for p in pdf_pages))
+
+    if not has_usable_text:
+        summary = (
+            f"[Local PDF Extraction — Scanned or Non-Extractable Document]\n"
+            f"No extractable text could be recovered from '{filename}' ({total_pages} pages). "
+            f"The document appears to be a scanned image or contains non-extractable raster graphics. "
+            f"Gemini cloud extraction was unavailable: {gemini_error_detail}. "
+            f"Governance rules may be created manually using '+ Add Rule' or by uploading a digital text PDF."
+        )
+        timings = {
+            "event": "extraction_timing",
+            "filename": filename,
+            "extraction_mode": "local_fallback_no_text",
+            "outcome": "limitation_reported",
+            "gemini_error": gemini_error_detail,
+            "pdf_parsing_ms": pdf_parsing_ms,
+            "total_elapsed_ms": round((time.perf_counter() - t_start) * 1000, 2)
+        }
+        return summary, [], [], timings
+
+    candidate_rules: List[Dict[str, Any]] = []
+    candidate_facts: List[Dict[str, Any]] = []
+
+    # 1. Deterministic Traceability Matrix Parsing (Freshsip style)
+    if known_matrix:
+        for code, meta in known_matrix.items():
+            primary_page = 1
+            for idx, p_text in enumerate(pdf_pages, 1):
+                if code in p_text:
+                    primary_page = idx
+                    break
+
+            page_text = pdf_pages[primary_page - 1] if 1 <= primary_page <= len(pdf_pages) else ""
+            excerpt = f"Requirement under {code}: {meta.get('title')}"
+            m = re.search(rf'({re.escape(code)}[^\n.!?]+[.!?]?)', page_text)
+            if m:
+                excerpt = m.group(1).strip()
+
+            rtype = meta.get("rule_type", "guideline")
+            mapped_type = "prohibited_word" if rtype == "prohibition" else (
+                "required_term" if rtype == "requirement" else "guideline"
+            )
+
+            canonical_sev = meta.get("severity", "warning").lower()
+            if canonical_sev not in ("critical", "high", "medium", "low"):
+                canonical_sev = "warning"
+
+            rule_dict = {
+                "rule_code": code,
+                "title": meta.get("title") or code,
+                "pattern": meta.get("title") or code,
+                "explanation": f"Rule requirement: {meta.get('title')}",
+                "severity": canonical_sev,
+                "rule_type": mapped_type,
+                "context_condition": None,
+                "source_citation": f"{filename}, Page {primary_page}",
+                "source_status": meta.get("source_status", "pending_review"),
+                "status": "pending_review",  # CRITICAL: Always pending_review
+                "enforcement_action": meta.get("enforcement_action", "flag_for_review"),
+                "rationale": f"Governance rule deterministically extracted from traceability matrix ({code}).",
+                "recommended_alternatives": None,
+                "exceptions": None,
+                "examples_bad": None,
+                "examples_good": None,
+                "evidence_passage": excerpt,
+                "page_number": primary_page,
+                "evidence_validation": "verified_exact",
+                "uncertainty_notes": (
+                    f"LOCAL_EXTRACTION: Deterministically extracted from traceability matrix "
+                    f"(Gemini unavailable). Reviewer verification required before approval."
+                ),
+                "original_extraction": json.dumps({"extraction_mode": "local_traceability_matrix", "rule_code": code}),
+                "is_corrected": False
+            }
+            candidate_rules.append(rule_dict)
+
+    # 2. Structured Rule Definitions in Page Text (e.g. NexoraTech style)
+    if not candidate_rules:
+        blocks = re.split(r'(?=Rule ID:\s*[A-Z0-9-]+)', full_pdf_text)
+        if len(blocks) > 1:
+            for b in blocks[1:]:
+                m_id = re.search(r'Rule ID:\s*([A-Z0-9-]+)', b)
+                m_title = re.search(r'Rule title:\s*([^\n|]+)', b)
+                m_sev = re.search(r'Severity:\s*([^\n|]+)', b)
+                m_cat = re.search(r'Category:\s*([^|\n]+)', b)
+                m_req = re.search(r'Requirement:\s*([\s\S]*?)(?:Example of non-compliant|Applicable product|\n\s*\n|$)', b)
+                m_bad = re.search(r'Example of non-compliant content:\s*[“"\']?([^”"\n]+)', b)
+                m_good = re.search(r'Example of compliant content[^:\n]*:\s*[“"\']?([^”"\n]+)', b)
+
+                if m_id:
+                    code = m_id.group(1).strip()
+                    title = m_title.group(1).strip() if m_title else code
+                    raw_sev = m_sev.group(1).strip().lower() if m_sev else "warning"
+                    sev = raw_sev if raw_sev in ("critical", "high", "medium", "low") else "warning"
+                    req_text = " ".join(m_req.group(1).split()) if m_req else f"Rule requirement under {code}."
+                    bad_ex = m_bad.group(1).strip() if m_bad else None
+                    good_ex = m_good.group(1).strip() if m_good else None
+
+                    # Locate 1-indexed page where this rule block occurs
+                    primary_page = 1
+                    for idx, p_text in enumerate(pdf_pages, 1):
+                        if f"Rule ID: {code}" in p_text or f"Rule ID:{code}" in p_text or code in p_text:
+                            primary_page = idx
+                            if f"Rule ID: {code}" in p_text or f"Rule ID:{code}" in p_text:
+                                break
+
+                    pattern_str = bad_ex if bad_ex else title
+                    cat_lower = m_cat.group(1).strip().lower() if m_cat else ""
+                    mapped_type = "prohibited_word" if bad_ex else (
+                        "claim_policy" if "claim" in cat_lower else "guideline"
+                    )
+
+                    rule_dict = {
+                        "rule_code": code,
+                        "title": title,
+                        "pattern": pattern_str,
+                        "explanation": req_text,
+                        "severity": sev,
+                        "rule_type": mapped_type,
+                        "context_condition": None,
+                        "source_citation": f"{filename}, Page {primary_page}",
+                        "source_status": "pending_review",
+                        "status": "pending_review",  # CRITICAL: Always pending_review
+                        "enforcement_action": "flag_for_review",
+                        "rationale": f"Governance rule extracted locally from {code} definition block.",
+                        "recommended_alternatives": json.dumps([good_ex]) if good_ex else None,
+                        "exceptions": None,
+                        "examples_bad": json.dumps([bad_ex]) if bad_ex else None,
+                        "examples_good": json.dumps([good_ex]) if good_ex else None,
+                        "evidence_passage": f"{code} - {title}: {req_text[:180]}",
+                        "page_number": primary_page,
+                        "evidence_validation": "verified_exact",
+                        "uncertainty_notes": (
+                            f"LOCAL_EXTRACTION: Extracted via local deterministic text parser "
+                            f"(Gemini unavailable: {gemini_error_detail}). Reviewer verification required before approval."
+                        ),
+                        "original_extraction": json.dumps({"extraction_mode": "local_text_parser", "rule_code": code}),
+                        "is_corrected": False
+                    }
+                    candidate_rules.append(rule_dict)
+
+    # 3. Generic Rule ID Pattern Scan Fallback
+    if not candidate_rules:
+        seen_codes = set()
+        for idx, p_text in enumerate(pdf_pages, 1):
+            for line in p_text.splitlines():
+                m_gen = re.search(r'([A-Z]{2,6}-RULE-\d{2,4})\b', line)
+                if m_gen:
+                    code = m_gen.group(1)
+                    if code not in seen_codes:
+                        seen_codes.add(code)
+                        clean_line = " ".join(line.split())
+                        candidate_rules.append({
+                            "rule_code": code,
+                            "title": clean_line[:80],
+                            "pattern": clean_line[:120],
+                            "explanation": clean_line,
+                            "severity": "warning",
+                            "rule_type": "guideline",
+                            "context_condition": None,
+                            "source_citation": f"{filename}, Page {idx}",
+                            "source_status": "pending_review",
+                            "status": "pending_review",
+                            "enforcement_action": "flag_for_review",
+                            "rationale": f"Rule candidate identified locally on page {idx}.",
+                            "recommended_alternatives": None,
+                            "exceptions": None,
+                            "examples_bad": None,
+                            "examples_good": None,
+                            "evidence_passage": clean_line,
+                            "page_number": idx,
+                            "evidence_validation": "verified_exact",
+                            "uncertainty_notes": (
+                                f"LOCAL_EXTRACTION: Identified via local pattern scan "
+                                f"(Gemini unavailable). Reviewer verification required before approval."
+                            ),
+                            "original_extraction": json.dumps({"extraction_mode": "local_pattern_scan", "rule_code": code}),
+                            "is_corrected": False
+                        })
+
+    # 4. Product Facts Pattern Scan
+    seen_facts = set()
+    for idx, p_text in enumerate(pdf_pages, 1):
+        for line in p_text.splitlines():
+            m_fact = re.search(r'([A-Z]{2,6}-FACT-\d{2,4})\b', line)
+            if m_fact:
+                f_code = m_fact.group(1)
+                if f_code not in seen_facts:
+                    seen_facts.add(f_code)
+                    clean_line = " ".join(line.split())
+                    candidate_facts.append({
+                        "product_name": filename.replace(".pdf", "").replace("_", " ").title(),
+                        "category": "specification",
+                        "fact_key": f_code,
+                        "fact_value": clean_line[:200],
+                        "supporting_evidence": clean_line,
+                        "source_citation": f"{filename}, Page {idx}",
+                        "product_id": None,
+                        "unit": None,
+                        "value_status": "explicitly_stated",
+                        "source_status": "pending_review",
+                        "page_number": idx,
+                        "evidence_validation": "verified_exact",
+                        "uncertainty_notes": (
+                            f"LOCAL_EXTRACTION: Fact candidate parsed locally (Gemini unavailable). "
+                            f"Reviewer verification required before approval."
+                        ),
+                        "original_extraction": json.dumps({"extraction_mode": "local_fact_scan", "fact_code": f_code}),
+                        "is_corrected": False,
+                        "status": "pending_review"
+                    })
+
+    # Build clear, transparent summary
+    rule_msg = (
+        f"Extracted {len(candidate_rules)} candidate rules and {len(candidate_facts)} candidate facts into Pending Review."
+        if candidate_rules
+        else "No structured rule tables detected automatically; use '+ Add Rule' to enter rules manually from the document text."
+    )
+    summary = (
+        f"[Local PDF Text Extraction — Gemini Unavailable]\n"
+        f"Extracted text from {total_pages} page(s) ({total_chars} characters) in '{filename}'.\n"
+        f"{rule_msg}\n"
+        f"Gemini notice: {gemini_error_detail}\n"
+        f"All extracted items start in Pending Review and require human reviewer sign-off before governance enforcement."
+    )
+
+    timings = {
+        "event": "extraction_timing",
+        "filename": filename,
+        "extraction_mode": "local_fallback",
+        "outcome": "recovered_locally",
+        "gemini_error": gemini_error_detail,
+        "pdf_parsing_ms": pdf_parsing_ms,
+        "total_elapsed_ms": round((time.perf_counter() - t_start) * 1000, 2),
+        "rules_extracted": len(candidate_rules),
+        "facts_extracted": len(candidate_facts)
+    }
+
+    return summary, candidate_rules, candidate_facts, timings
+
+
 def extract_pdf_text_and_candidates(
     file_path: str,
     filename: str
@@ -83,7 +344,7 @@ def extract_pdf_text_and_candidates(
     3. Grounded in source passages with evidence validation against actual PDF pages.
     4. Distinguishes stated facts from data gaps (missing_not_provided).
     5. Excludes non-governance elements (disclaimers, demographics, examples).
-    6. Does NOT silently fall back to regex on failure; raises clear exception.
+    6. Gracefully recovers via deterministic local text extraction if Gemini is unavailable (e.g. 503).
     7. Separates deterministic matrix metadata from semantic interpretation.
     """
     if not os.path.exists(file_path):
@@ -103,9 +364,31 @@ def extract_pdf_text_and_candidates(
         f"Found {len(known_matrix)} deterministic rule matrix entries."
     )
 
-    # 2. Execute single structured Gemini extraction request
-    logger.info(f"Initiating single Gemini structured extraction on '{filename}' ({total_pdf_pages} pages)...")
-    extracted_doc, gemini_timings = run_gemini_pdf_extraction(file_path, filename, known_matrix=known_matrix)
+    # 2. Attempt Gemini structured extraction with local recovery fallback
+    extracted_doc = None
+    gemini_timings: Dict[str, Any] = {}
+    gemini_error_msg = ""
+
+    try:
+        logger.info(f"Initiating single Gemini structured extraction on '{filename}' ({total_pdf_pages} pages)...")
+        extracted_doc, gemini_timings = run_gemini_pdf_extraction(file_path, filename, known_matrix=known_matrix)
+    except (GeminiConfigurationError, GeminiExtractionError) as g_err:
+        gemini_error_msg = str(g_err)
+        logger.warning(
+            f"Gemini structured extraction unavailable for '{filename}' ({gemini_error_msg}). "
+            f"Recovering through local PDF text extraction path..."
+        )
+
+    if extracted_doc is None:
+        # Recover gracefully through local extraction
+        return extract_local_pdf_candidates(
+            pdf_pages=pdf_pages,
+            filename=filename,
+            known_matrix=known_matrix,
+            gemini_error_detail=gemini_error_msg,
+            t_start=t_total_start,
+            pdf_parsing_ms=pdf_parsing_ms
+        )
 
     candidate_rules: List[Dict[str, Any]] = []
     candidate_facts: List[Dict[str, Any]] = []

@@ -26,7 +26,8 @@ import {
   HelpCircle,
   FileCheck2,
   ArrowRight,
-  ShieldCheck
+  ShieldCheck,
+  Plus
 } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../services/api';
@@ -111,6 +112,26 @@ export const KnowledgeLibrary: React.FC = () => {
 
   // Reprocessing state
   const [reprocessingId, setReprocessingId] = useState<string | null>(null);
+
+  // Manual rule creation modal state
+  const [addRuleModalOpen, setAddRuleModalOpen] = useState(false);
+  const [newRuleForm, setNewRuleForm] = useState({
+    title: '',
+    pattern: '',
+    explanation: '',
+    severity: 'warning',
+    rule_type: 'prohibited_word',
+    source_id: '',
+    page_number: '',
+    evidence_passage: ''
+  });
+  const [savingNewRule, setSavingNewRule] = useState(false);
+
+  // Document text viewing modal state
+  const [viewTextModalOpen, setViewTextModalOpen] = useState(false);
+  const [viewTextData, setViewTextData] = useState<any>(null);
+  const [loadingText, setLoadingText] = useState(false);
+  const [selectedTextPage, setSelectedTextPage] = useState<number>(1);
 
   const isReviewer = role === 'knowledge_reviewer' || role === 'org_admin';
 
@@ -210,6 +231,96 @@ export const KnowledgeLibrary: React.FC = () => {
       setLogoFile(null);
       setLogoPreviewUrl(null);
     }
+  };
+
+  const handleOpenAddRule = () => {
+    setNewRuleForm({
+      title: '',
+      pattern: '',
+      explanation: '',
+      severity: 'warning',
+      rule_type: 'prohibited_word',
+      source_id: sources.length > 0 ? sources[0].id : '',
+      page_number: '',
+      evidence_passage: ''
+    });
+    setAddRuleModalOpen(true);
+  };
+
+  const handleSaveNewRule = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newRuleForm.title.trim() || !newRuleForm.pattern.trim() || !newRuleForm.explanation.trim()) {
+      alert("Please provide title, trigger pattern, and explanation for the rule.");
+      return;
+    }
+    setSavingNewRule(true);
+    try {
+      const selectedSrc = sources.find(s => s.id === newRuleForm.source_id);
+      await api.createRule({
+        title: newRuleForm.title.trim(),
+        pattern: newRuleForm.pattern.trim(),
+        explanation: newRuleForm.explanation.trim(),
+        severity: newRuleForm.severity,
+        rule_type: newRuleForm.rule_type,
+        source_id: newRuleForm.source_id || undefined,
+        brand_id: selectedBrandId || (selectedSrc ? selectedSrc.brand_id : undefined) || (brands.length > 0 ? brands[0].id : undefined),
+        source_citation: selectedSrc ? `${selectedSrc.filename}${newRuleForm.page_number ? `, Page ${newRuleForm.page_number}` : ''}` : undefined,
+        page_number: newRuleForm.page_number ? parseInt(newRuleForm.page_number, 10) : undefined,
+        evidence_passage: newRuleForm.evidence_passage.trim() || undefined,
+        uncertainty_notes: "MANUAL_ENTRY: Created manually by reviewer. Human verification required before approval."
+      });
+      setAddRuleModalOpen(false);
+      await loadData();
+    } catch (err: any) {
+      alert(`Failed to create rule: ${err.message || err}`);
+    } finally {
+      setSavingNewRule(false);
+    }
+  };
+
+  const handleViewSourceText = async (sourceId: string, title: string) => {
+    setLoadingText(true);
+    setViewTextModalOpen(true);
+    setViewTextData(null);
+    setSelectedTextPage(1);
+    try {
+      const data = await api.getSourceText(sourceId);
+      setViewTextData(data);
+    } catch (err: any) {
+      alert(`Could not fetch document text: ${err.message || err}`);
+      setViewTextModalOpen(false);
+    } finally {
+      setLoadingText(false);
+    }
+  };
+
+  const getExtractionMethodBadge = (rule: KnowledgeRule) => {
+    if (rule.status === 'approved') {
+      return (
+        <span style={{ background: 'rgba(34, 197, 94, 0.15)', color: '#4ade80', border: '1px solid rgba(34, 197, 94, 0.3)', padding: '2px 8px', borderRadius: 4, fontSize: '0.7rem', fontWeight: 600 }}>
+          Approved Rule (Verified)
+        </span>
+      );
+    }
+    if (rule.uncertainty_notes && rule.uncertainty_notes.includes('LOCAL_EXTRACTION')) {
+      return (
+        <span style={{ background: 'rgba(99, 102, 241, 0.15)', color: '#818cf8', border: '1px solid rgba(99, 102, 241, 0.3)', padding: '2px 8px', borderRadius: 4, fontSize: '0.7rem', fontWeight: 600 }}>
+          Local Text Extraction (Pending Review)
+        </span>
+      );
+    }
+    if (rule.uncertainty_notes && rule.uncertainty_notes.includes('MANUAL_ENTRY')) {
+      return (
+        <span style={{ background: 'rgba(236, 72, 153, 0.15)', color: '#f472b6', border: '1px solid rgba(236, 72, 153, 0.3)', padding: '2px 8px', borderRadius: 4, fontSize: '0.7rem', fontWeight: 600 }}>
+          Manual Entry (Pending Review)
+        </span>
+      );
+    }
+    return (
+      <span style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', border: '1px solid rgba(245, 158, 11, 0.3)', padding: '2px 8px', borderRadius: 4, fontSize: '0.7rem', fontWeight: 600 }}>
+        AI Candidate (Pending Review)
+      </span>
+    );
   };
 
   const handleViewSamplePdf = (e: React.MouseEvent) => {
@@ -754,8 +865,18 @@ export const KnowledgeLibrary: React.FC = () => {
           </button>
         </div>
 
-        {/* Status Filter */}
+        {/* Status Filter and Actions */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {isReviewer && (
+            <button
+              onClick={handleOpenAddRule}
+              className="btn btn-primary"
+              style={{ padding: '6px 12px', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            >
+              <Plus size={14} />
+              Add Rule
+            </button>
+          )}
           <Filter size={14} color="var(--text-dim)" />
           <select
             value={statusFilter}
@@ -791,6 +912,7 @@ export const KnowledgeLibrary: React.FC = () => {
                     )}
                     <span style={{ fontWeight: 700, fontSize: '1rem', color: '#fff' }}>{rule.title}</span>
                     <StatusBadge status={rule.status} />
+                    {getExtractionMethodBadge(rule)}
                     {getSourceStatusBadge(rule.source_status)}
                     {getEvidenceValidationBadge(rule.evidence_validation, rule.page_number)}
                     {rule.is_corrected && (
@@ -1059,18 +1181,32 @@ export const KnowledgeLibrary: React.FC = () => {
                   <div>Facts Extracted: <strong>{src.facts_count || 0}</strong></div>
                 </div>
 
-                {isReviewer && src.filename.toLowerCase().endsWith('.pdf') && (
-                  <button
-                    onClick={() => handleReprocessSource(src.id, src.title)}
-                    disabled={reprocessingId === src.id}
-                    className="btn btn-secondary"
-                    style={{ fontSize: '0.75rem', padding: '6px 12px', display: 'inline-flex', alignItems: 'center', gap: 6 }}
-                    title="Safely re-run Gemini extraction on this document (preserves reviewed knowledge)"
-                  >
-                    <RefreshCw size={13} className={reprocessingId === src.id ? 'spin' : ''} />
-                    {reprocessingId === src.id ? 'Reprocessing...' : 'Reprocess with Gemini'}
-                  </button>
-                )}
+                <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                  {src.filename.toLowerCase().endsWith('.pdf') && (
+                    <button
+                      onClick={() => handleViewSourceText(src.id, src.title)}
+                      className="btn btn-secondary"
+                      style={{ fontSize: '0.75rem', padding: '6px 12px', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                      title="View extracted document text per page"
+                    >
+                      <FileText size={13} />
+                      View Document Text
+                    </button>
+                  )}
+
+                  {isReviewer && src.filename.toLowerCase().endsWith('.pdf') && (
+                    <button
+                      onClick={() => handleReprocessSource(src.id, src.title)}
+                      disabled={reprocessingId === src.id}
+                      className="btn btn-secondary"
+                      style={{ fontSize: '0.75rem', padding: '6px 12px', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                      title="Safely re-run Gemini extraction on this document (preserves reviewed knowledge)"
+                    >
+                      <RefreshCw size={13} className={reprocessingId === src.id ? 'spin' : ''} />
+                      {reprocessingId === src.id ? 'Reprocessing...' : 'Reprocess with Gemini'}
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           ))}
@@ -1994,6 +2130,282 @@ export const KnowledgeLibrary: React.FC = () => {
                   </button>
                 </div>
               </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Manual Rule Creation Modal */}
+      {addRuleModalOpen && (
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.75)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 110,
+          padding: 20
+        }}>
+          <div className="card" style={{ width: '100%', maxWidth: 580, maxHeight: '90vh', overflowY: 'auto', background: '#131b2e', border: '1px solid rgba(99, 102, 241, 0.4)' }}>
+            <div className="flex-between" style={{ marginBottom: 16 }}>
+              <div>
+                <h2 className="title-md">Create Brand Governance Rule</h2>
+                <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: 2 }}>
+                  Rules start in <strong style={{ color: '#fbbf24' }}>Pending Review</strong> and must be verified by a human reviewer.
+                </div>
+              </div>
+              <button
+                onClick={() => setAddRuleModalOpen(false)}
+                style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: 4 }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveNewRule}>
+              <div className="form-group" style={{ marginBottom: 12 }}>
+                <label className="form-label">Rule Title *</label>
+                <input
+                  type="text"
+                  value={newRuleForm.title}
+                  onChange={(e) => setNewRuleForm({ ...newRuleForm, title: e.target.value })}
+                  placeholder="e.g. Unsupported Performance Claims"
+                  className="input"
+                  required
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+                <div className="form-group">
+                  <label className="form-label">Rule Type *</label>
+                  <select
+                    value={newRuleForm.rule_type}
+                    onChange={(e) => setNewRuleForm({ ...newRuleForm, rule_type: e.target.value })}
+                    className="select"
+                  >
+                    <option value="prohibited_word">Prohibited Words / Phrases</option>
+                    <option value="required_term">Required Terms / Disclosures</option>
+                    <option value="claim_policy">Claim Substantiation Policy</option>
+                    <option value="tone_guideline">Tone & Voice Guideline</option>
+                    <option value="image_standard">Visual & Asset Standard</option>
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Enforcement Severity *</label>
+                  <select
+                    value={newRuleForm.severity}
+                    onChange={(e) => setNewRuleForm({ ...newRuleForm, severity: e.target.value })}
+                    className="select"
+                  >
+                    <option value="critical">Critical (Hard Block)</option>
+                    <option value="high">High (Strict Flag)</option>
+                    <option value="warning">Warning / Medium</option>
+                    <option value="low">Low (Advisory)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: 12 }}>
+                <label className="form-label">Trigger Pattern or Forbidden Text *</label>
+                <input
+                  type="text"
+                  value={newRuleForm.pattern}
+                  onChange={(e) => setNewRuleForm({ ...newRuleForm, pattern: e.target.value })}
+                  placeholder="e.g. 100% secure, unhackable, zero risk"
+                  className="input"
+                  required
+                />
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-dim)', marginTop: 2 }}>
+                  Content containing this phrase will trigger a governance violation.
+                </div>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: 12 }}>
+                <label className="form-label">Requirement & Explanation *</label>
+                <textarea
+                  value={newRuleForm.explanation}
+                  onChange={(e) => setNewRuleForm({ ...newRuleForm, explanation: e.target.value })}
+                  placeholder="Explain why this rule exists and how creators should write compliant content..."
+                  className="input"
+                  rows={3}
+                  required
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12, marginBottom: 12 }}>
+                <div className="form-group">
+                  <label className="form-label">Link to Source Document</label>
+                  <select
+                    value={newRuleForm.source_id}
+                    onChange={(e) => setNewRuleForm({ ...newRuleForm, source_id: e.target.value })}
+                    className="select"
+                  >
+                    <option value="">None / General Guideline</option>
+                    {sources.map(s => (
+                      <option key={s.id} value={s.id}>
+                        {s.title} ({s.filename})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Page Number</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={newRuleForm.page_number}
+                    onChange={(e) => setNewRuleForm({ ...newRuleForm, page_number: e.target.value })}
+                    placeholder="e.g. 4"
+                    className="input"
+                  />
+                </div>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: 16 }}>
+                <label className="form-label">Supporting Evidence Passage</label>
+                <textarea
+                  value={newRuleForm.evidence_passage}
+                  onChange={(e) => setNewRuleForm({ ...newRuleForm, evidence_passage: e.target.value })}
+                  placeholder="Quotation from the brand guidelines supporting this requirement..."
+                  className="input"
+                  rows={2}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+                <button
+                  type="button"
+                  onClick={() => setAddRuleModalOpen(false)}
+                  className="btn btn-secondary"
+                  disabled={savingNewRule}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingNewRule}
+                  className="btn btn-primary"
+                >
+                  {savingNewRule ? 'Creating...' : 'Create Rule (Pending Review)'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Document Text Viewing Modal */}
+      {viewTextModalOpen && (
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.75)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 110,
+          padding: 20
+        }}>
+          <div className="card" style={{ width: '100%', maxWidth: 780, maxHeight: '90vh', display: 'flex', flexDirection: 'column', background: '#131b2e', border: '1px solid rgba(99, 102, 241, 0.4)' }}>
+            <div className="flex-between" style={{ marginBottom: 12 }}>
+              <div>
+                <h2 className="title-md" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <FileText size={18} color="#818cf8" />
+                  {viewTextData ? viewTextData.filename : 'Document Text'}
+                </h2>
+                {viewTextData && (
+                  <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: 2 }}>
+                    {viewTextData.total_pages} page(s) | {viewTextData.total_characters} characters extracted locally
+                  </div>
+                )}
+              </div>
+              <button
+                onClick={() => setViewTextModalOpen(false)}
+                style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: 4 }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {loadingText ? (
+              <div style={{ padding: 40, textAlign: 'center', color: '#a5b4fc' }}>
+                <RefreshCw size={24} className="spin" style={{ margin: '0 auto 12px' }} />
+                Extracting document text from storage...
+              </div>
+            ) : viewTextData ? (
+              <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+                {/* Page Selector Tabs */}
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10, paddingBottom: 8, borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                  <button
+                    onClick={() => setSelectedTextPage(0)}
+                    className={`tab-btn ${selectedTextPage === 0 ? 'active' : ''}`}
+                    style={{ fontSize: '0.75rem', padding: '4px 10px' }}
+                  >
+                    All Pages ({viewTextData.total_pages})
+                  </button>
+                  {viewTextData.pages.map((p: any) => (
+                    <button
+                      key={p.page_number}
+                      onClick={() => setSelectedTextPage(p.page_number)}
+                      className={`tab-btn ${selectedTextPage === p.page_number ? 'active' : ''}`}
+                      style={{ fontSize: '0.75rem', padding: '4px 10px' }}
+                    >
+                      Page {p.page_number}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Text View Box */}
+                <div style={{
+                  flex: 1,
+                  minHeight: 280,
+                  maxHeight: 460,
+                  overflowY: 'auto',
+                  background: '#0a0e1a',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  borderRadius: 6,
+                  padding: 14,
+                  fontSize: '0.8rem',
+                  lineHeight: 1.6,
+                  color: '#e2e8f0',
+                  whiteSpace: 'pre-wrap',
+                  fontFamily: 'monospace'
+                }}>
+                  {selectedTextPage === 0
+                    ? viewTextData.full_text || '[No extractable text]'
+                    : (viewTextData.pages.find((p: any) => p.page_number === selectedTextPage)?.text || '[No text on this page]')}
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 14 }}>
+                  <button
+                    onClick={() => {
+                      setViewTextModalOpen(false);
+                      handleOpenAddRule();
+                    }}
+                    className="btn btn-secondary"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.8rem' }}
+                  >
+                    <Plus size={14} />
+                    Add Rule from this Document
+                  </button>
+                  <button
+                    onClick={() => setViewTextModalOpen(false)}
+                    className="btn btn-primary"
+                    style={{ fontSize: '0.8rem' }}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ padding: 40, textAlign: 'center', color: '#fb7185' }}>
+                Failed to load document text.
+              </div>
             )}
           </div>
         </div>

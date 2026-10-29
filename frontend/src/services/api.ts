@@ -161,7 +161,18 @@ class ApiService {
     return this.request<KnowledgeSource[]>('/knowledge/sources');
   }
 
+  async getSourceText(sourceId: string): Promise<any> {
+    return this.request<any>(`/knowledge/sources/${sourceId}/text`);
+  }
+
   // Knowledge Rules
+  async createRule(payload: any): Promise<KnowledgeRule> {
+    return this.request<KnowledgeRule>('/knowledge/rules', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
   async getRules(statusFilter?: string): Promise<KnowledgeRule[]> {
     const q = statusFilter ? `?status_filter=${statusFilter}` : '';
     return this.request<KnowledgeRule[]>(`/knowledge/rules${q}`);

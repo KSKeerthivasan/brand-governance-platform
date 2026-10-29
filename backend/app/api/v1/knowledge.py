@@ -22,6 +22,7 @@ from app.schemas.knowledge import (
 )
 from app.services.storage import storage_service
 from app.services.extraction import extract_pdf_text_and_candidates, extract_image_metadata
+from app.services.evidence_validator import extract_pdf_pages
 from app.services.gemini_extractor import GeminiConfigurationError, GeminiExtractionError
 from app.services.audit import log_audit_event
 from app.services.auth import decode_access_token
@@ -62,21 +63,47 @@ async def upload_knowledge_document(
         source_type, source_type.replace("_", " ").title()
     )
 
-    # Create KnowledgeSource record in pending_review
-    source = KnowledgeSource(
-        organization_id=org_id,
-        brand_id=brand_id,
-        title=effective_title,
-        source_type=source_type,
-        filename=safe_filename,
-        file_path=file_path,
-        file_size_bytes=file_size,
-        mime_type=file.content_type or "application/octet-stream",
-        version=1,
-        status="pending_review",  # Critical: never auto-approved!
-        uploaded_by=current_user.id
-    )
-    db.add(source)
+    # Deduplicate: Check if a KnowledgeSource already exists for this org, brand, and filename
+    existing_source = db.query(KnowledgeSource).filter(
+        KnowledgeSource.organization_id == org_id,
+        KnowledgeSource.brand_id == brand_id,
+        KnowledgeSource.filename == safe_filename
+    ).first()
+
+    if existing_source:
+        source = existing_source
+        source.file_path = file_path
+        source.file_size_bytes = file_size
+        source.mime_type = file.content_type or "application/octet-stream"
+        source.version += 1
+        source.status = "pending_review"
+        # Purge only uncorrected pending candidate rules and facts for this source to avoid duplicates on retry
+        db.query(KnowledgeRule).filter(
+            KnowledgeRule.source_id == source.id,
+            KnowledgeRule.status == "pending_review",
+            KnowledgeRule.is_corrected == False
+        ).delete(synchronize_session=False)
+        db.query(KnowledgeFact).filter(
+            KnowledgeFact.source_id == source.id,
+            KnowledgeFact.status == "pending_review",
+            KnowledgeFact.is_corrected == False
+        ).delete(synchronize_session=False)
+    else:
+        # Create KnowledgeSource record in pending_review
+        source = KnowledgeSource(
+            organization_id=org_id,
+            brand_id=brand_id,
+            title=effective_title,
+            source_type=source_type,
+            filename=safe_filename,
+            file_path=file_path,
+            file_size_bytes=file_size,
+            mime_type=file.content_type or "application/octet-stream",
+            version=1,
+            status="pending_review",  # Critical: never auto-approved!
+            uploaded_by=current_user.id
+        )
+        db.add(source)
     db.flush()
 
     rules_created = 0
@@ -90,27 +117,12 @@ async def upload_knowledge_document(
     if file.content_type == "application/pdf" or safe_filename.lower().endswith(".pdf"):
         try:
             summary, candidate_rules, candidate_facts, extraction_timings = extract_pdf_text_and_candidates(local_path, safe_filename)
-        except GeminiConfigurationError as gce:
-            db.rollback()
-            logger.warning(f"EXTRACTION_STAGE_METRICS: {json.dumps({'event': 'extraction_timing', 'filename': safe_filename, 'outcome': 'failed', 'error': 'GeminiConfigurationError'})}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Gemini configuration error: {gce}"
-            )
-        except GeminiExtractionError as gee:
-            db.rollback()
-            logger.warning(f"EXTRACTION_STAGE_METRICS: {json.dumps({'event': 'extraction_timing', 'filename': safe_filename, 'outcome': 'failed', 'error': 'GeminiExtractionError'})}")
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Gemini extraction failed: {gee}"
-            )
         except Exception as ex:
-            db.rollback()
-            logger.warning(f"EXTRACTION_STAGE_METRICS: {json.dumps({'event': 'extraction_timing', 'filename': safe_filename, 'outcome': 'failed', 'error': str(ex)})}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Document extraction error: {ex}"
-            )
+            logger.error(f"Extraction error for '{safe_filename}': {ex}")
+            summary = f"Document upload preserved. Extraction encountered an error: {str(ex)[:200]}. You may enter rules manually using '+ Add Rule' or reprocess later."
+            candidate_rules = []
+            candidate_facts = []
+            extraction_timings = {"outcome": "failed", "error": str(ex)}
 
         source.extracted_summary = summary
 
@@ -255,6 +267,43 @@ def list_knowledge_sources(
         result.append(out)
 
     return result
+
+
+@router.get("/sources/{source_id}/text")
+def get_knowledge_source_text(
+    source_id: str,
+    membership: OrganizationMembership = Depends(require_any_member),
+    db: Session = Depends(get_db)
+):
+    """
+    Returns the extracted text per page from an uploaded knowledge source PDF.
+    Enforces strict tenant isolation: users can only view documents from their own organization.
+    """
+    source = db.query(KnowledgeSource).filter(
+        KnowledgeSource.id == source_id,
+        KnowledgeSource.organization_id == membership.organization_id
+    ).first()
+
+    if not source:
+        raise HTTPException(status_code=404, detail="Knowledge source not found.")
+
+    if not storage_service.check_exists(source.file_path):
+        raise HTTPException(status_code=400, detail="Source file does not exist in storage.")
+
+    local_path = storage_service.get_file_path_for_processing(source.file_path)
+    pages = extract_pdf_pages(local_path)
+    full_text = "\n\n".join(pages)
+
+    return {
+        "source_id": source.id,
+        "title": source.title,
+        "filename": source.filename,
+        "total_pages": len(pages),
+        "total_characters": len(full_text),
+        "extracted_summary": source.extracted_summary,
+        "pages": [{"page_number": idx, "text": p} for idx, p in enumerate(pages, 1)],
+        "full_text": full_text
+    }
 
 
 @router.post("/sources/{source_id}/reprocess", response_model=KnowledgeSourceOut)
