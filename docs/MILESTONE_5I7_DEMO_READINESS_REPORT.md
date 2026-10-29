@@ -99,15 +99,45 @@ Because Inkloom.AI is deployed on zero-billing infrastructure for demo purposes,
 
 ---
 
-## 6. Backup & Recovery Verification
+## 6. Backup & Recovery Assessment
 
-### 6.1 Database Backups
-- **Repository Backup Snapshot:** Verified structured JSON backup at [`backend/backups/freshsip_backup_20261027_124649/freshsip_records.json`](file:///e:/CodeStar30/backend/backups/freshsip_backup_20261027_124649/freshsip_records.json).
-- **Structural Integrity Test:** Parsed and validated all 131 entities across 7 tables (`knowledge_rules`, `knowledge_facts`, `knowledge_sources`, `brands`, `audit_events`).
-- **Managed Backups:** Supabase Managed PostgreSQL maintains continuous WAL logs and daily snapshot backups on the cloud project `qwvqifqnyurlqewkrsiw`.
+### 6.1 Supabase Project Tier & Native Backup Capabilities
+- **Current Plan:** Supabase **Free Tier** (Project `qwvqifqnyurlqewkrsiw`, Region `ap-northeast-1`).
+- **Continuous WAL & PITR Status:** **NOT ENABLED / NOT AVAILABLE.** Continuous Write-Ahead Log (WAL) archiving and Point-in-Time Recovery (PITR) are paid add-ons requiring a Supabase Pro or Team plan.
+- **Automated Snapshots:** Automated daily managed snapshots are not provided on the Free plan. Free-tier projects pause after 7 days of inactivity.
+- **Manual Backups:** Backups on the Free tier must be initiated manually using `pg_dump` via direct PostgreSQL connection string or Supabase CLI.
 
-### 6.2 Storage Backups
-- Master originals are stored in Supabase Storage with unique UUID-based keys. Local `storage_data/` is treated purely as disposable cache.
+### 6.2 Scope and Limitations of `freshsip_records.json`
+The repository contains an exported data snapshot at [`backend/backups/freshsip_backup_20261027_124649/freshsip_records.json`](file:///e:/CodeStar30/backend/backups/freshsip_backup_20261027_124649/freshsip_records.json).
+- **Classification:** **Tenant-scoped structured JSON export**, NOT a full database backup or proven disaster recovery image.
+- **Tables and Record Counts Covered (131 total entities):**
+  - `knowledge_rules`: 31 records (normative rule definitions)
+  - `knowledge_facts`: 64 records (product specifications and claims)
+  - `knowledge_sources`: 3 records (document metadata references)
+  - `brands`: 1 record (Freshsip brand entity)
+  - `audit_events`: 32 records (initial setup audit trail)
+  - `brand_assets`: 0 records
+  - `content_items`: 0 records
+- **Tables Omitted from the Export:**
+  - `users` (user accounts and password hashes)
+  - `organizations` and `organization_memberships` (tenant workspace links)
+  - `content_items` and `content_versions` (draft copy and checksums)
+  - `governance_runs` and `governance_findings` (compliance execution records)
+  - `approval_submissions` and `approval_decisions` (workflow audit trails)
+  - `revoked_tokens` (JWT blacklist table)
+- **Restore Status:** **UNVERIFIED.** While the JSON file has been validated for syntax and schema integrity, an actual database restoration from this JSON into PostgreSQL has **never been tested or proven**.
+
+### 6.3 Object Storage Backup & Recovery (`inkloom-private-assets`)
+- **Storage Location:** Supabase Storage private bucket `inkloom-private-assets`.
+- **Replication / Backup Pipeline:** **NONE CONFIGURED.** There is currently no secondary mirror, cross-region replication, or automated archive process configured for uploaded file assets.
+- **Backup Procedure:** Requires programmatic iteration over bucket objects via Supabase Storage REST API (`GET /storage/v1/object/list/inkloom-private-assets`) and downloading raw object bytes to local or cold storage.
+- **Recovery Procedure:** Requires re-uploading file bytes preserving exact tenant-prefixed keys (`{organization_id}/{subfolder}/{filename}`) to maintain referential integrity with `content_versions.poster_file_path` and `knowledge_sources.file_path`.
+- **Storage Restore Status:** **UNVERIFIED.** An end-to-end bucket restore procedure has not been executed.
+
+### 6.4 Disaster Recovery Status Verdict
+- **Full Database Disaster Recovery:** **UNVERIFIED.**
+- **Object-Storage Disaster Recovery:** **UNVERIFIED.**
+- Operational resilience currently relies on cloud hosting uptime and disposable local cache rebuilding from existing Supabase state, rather than a proven disaster-recovery pipeline.
 
 ---
 
