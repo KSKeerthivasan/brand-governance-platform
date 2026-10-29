@@ -128,24 +128,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const DEMO_PERSONA_EMAILS: Record<UserRole, string> = {
+    org_admin: 'admin@freshsip.demo',
+    content_creator: 'creator@freshsip.demo',
+    knowledge_reviewer: 'reviewer@freshsip.demo',
+    approval_manager: 'approver@freshsip.demo',
+  };
+
   const switchPersona = async (role: UserRole) => {
-    setLoading(true);
-    try {
-      const res = await api.devLogin(role, 'freshsip');
-      api.setAuth(res.access_token, res.organization_id);
-      setAuthState({
-        token: res.access_token,
-        user: res.user,
-        organizationId: res.organization_id,
-        organizationName: res.organization_name,
-        organizationSlug: res.organization_slug,
-        role: res.role,
-        isDemo: true,
-        isAuthenticated: true,
-      });
-    } finally {
-      setLoading(false);
-    }
+    const email = DEMO_PERSONA_EMAILS[role] || 'admin@freshsip.demo';
+    return login(email, 'Freshsip2026!', undefined, 'freshsip');
   };
 
   const onboard = async (payload: {
