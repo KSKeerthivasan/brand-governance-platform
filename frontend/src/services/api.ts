@@ -7,7 +7,11 @@ import {
   CorrectionSuggestion, CorrectionSuggestionApplyResponse
 } from '../types';
 
-const API_ROOT = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
+let rawBase = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
+if (rawBase.endsWith('/api/v1')) {
+  rawBase = rawBase.slice(0, -7);
+}
+const API_ROOT = rawBase;
 const API_BASE = `${API_ROOT}/api/v1`;
 
 class ApiService {
