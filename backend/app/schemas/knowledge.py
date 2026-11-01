@@ -241,6 +241,7 @@ class StagedRowPreview(BaseModel):
     parsed_data: Optional[dict] = None
     validation_errors: List[str] = []
     is_valid: bool
+    sheet_name: Optional[str] = None
 
 class StagedImportPreviewOut(BaseModel):
     id: str

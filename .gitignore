@@ -65,6 +65,7 @@ dist/
 Thumbs.db
 
 # Backups & Scratch Files
+scratch/
 backend/backups/
 backend/scratch/
 backend/reports/

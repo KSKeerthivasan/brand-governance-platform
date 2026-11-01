@@ -19,52 +19,52 @@ from app.models.knowledge import (
 )
 
 # -----------------------------------------------------------------------------
-# AUTHORITATIVE SCHEMA DEFINITIONS
+# AUTHORITATIVE SCHEMA DEFINITIONS (Preserve exact columns and order)
 # -----------------------------------------------------------------------------
 
 PRODUCT_CATALOGUE_COLUMNS = [
-    ("product_id", "Unique identifier for the product or service offering", True),
+    ("product_id", "Unique identifier for the product within organisation", True),
     ("product_name", "Official product or service name", True),
-    ("product_category", "Category of the offering", True),
-    ("offering_type", "Physical Product, Service, or Digital Product", True),
-    ("product_description", "Official descriptive information", True),
-    ("variant_name", "Variant, edition, plan, or model name", False),
-    ("sku", "Stock keeping unit or internal offering code", False),
-    ("pack_size", "Numeric quantity or capacity, where relevant", False),
-    ("pack_unit", "Unit such as ml, g, kg, L, hours, or seats", False),
-    ("ingredients_components", "Ingredients or core components, where relevant", False),
-    ("key_features", "Company-provided factual features", False),
-    ("specifications", "Product specifications or service details", False),
-    ("known_limitations", "Relevant limitations or restrictions", False),
-    ("applicable_market", "Country or region in which the record applies", True),
+    ("product_category", "Category to which the offering belongs", True),
+    ("offering_type", "Physical Product, Service, Digital Product, or Subscription", True),
+    ("product_description", "Clear factual description of the product", True),
+    ("variant_name", "Flavours, sizes, models or packaging variations", False),
+    ("sku", "Stock keeping unit. Required when variant_name is specified", False),
+    ("pack_size", "Positive numeric quantity or capacity, where relevant", False),
+    ("pack_unit", "Unit such as ml, L, g, kg, pieces, or seats", False),
+    ("ingredients_components", "Ingredients or core components (factual only; does not authorise claims)", False),
+    ("key_features", "Factual product features (not unapproved promotional claims)", False),
+    ("specifications", "Measurable technical details or storage requirements", False),
+    ("known_limitations", "Known restrictions, exclusions or mandatory warnings", False),
+    ("applicable_market", "Country or region in which record applies, or ALL", True),
     ("record_status", "Active, Inactive, or Discontinued", True),
 ]
 
 CLAIMS_REGISTER_COLUMNS = [
-    ("claim_id", "Unique claim identifier", True),
-    ("claim_text", "Official claim wording", True),
+    ("claim_id", "Unique claim identifier within organisation", True),
+    ("claim_text", "Official promotional claim statement being governed", True),
     ("claim_type", "Ingredient, Nutritional, Health, Performance, Quality, Comparative, Environmental, Endorsement, Origin, Safety, Other", True),
     ("claim_status", "Approved, Restricted, or Prohibited", True),
-    ("applicable_product_id", "Product ID to which the claim applies, or ALL", True),
-    ("approved_variations", "Alternative wording explicitly authorised by the company", False),
-    ("restricted_conditions", "Conditions that must be satisfied for a Restricted claim", False),
-    ("prohibited_variations", "Known wording variants that the organisation explicitly disallows", False),
-    ("applicable_market", "Country or region in which the claim authorisation applies", True),
-    ("effective_from", "Date from which the record is effective (YYYY-MM-DD)", True),
+    ("applicable_product_id", "Specific product_id or ALL (ALL scopes strictly within this organisation)", True),
+    ("approved_variations", "Alternative authorised wording (semicolon or newline delimited). Prohibited claims cannot contain variations", False),
+    ("restricted_conditions", "Mandatory conditions for Restricted claims (must be satisfied for use)", False),
+    ("prohibited_variations", "Known wording variants explicitly disallowed by organisation", False),
+    ("applicable_market", "Country or region in which claim authorisation applies, or ALL", True),
+    ("effective_from", "Date authorisation begins (YYYY-MM-DD)", True),
     ("effective_until", "Expiry date (YYYY-MM-DD); blank means no scheduled expiry", False),
 ]
 
 REQUIRED_DISCLOSURES_COLUMNS = [
-    ("disclosure_id", "Unique disclosure identifier", True),
-    ("disclosure_text", "Exact required disclosure wording", True),
-    ("applicable_product_id", "Product ID or ALL", True),
-    ("applicable_market", "Country or region", True),
-    ("applies_when", "Condition that triggers the disclosure", True),
-    ("effective_from", "Date from which the disclosure is effective (YYYY-MM-DD)", True),
+    ("disclosure_id", "Unique disclosure identifier (e.g. DISC001)", True),
+    ("disclosure_text", "Exact mandatory required disclosure wording", True),
+    ("applicable_product_id", "Specific product_id or ALL (ALL scopes strictly within this organisation)", True),
+    ("applicable_market", "Country or region, or ALL", True),
+    ("applies_when", "Documented condition or scenario triggering mandatory inclusion", True),
+    ("effective_from", "Date requirement takes effect (YYYY-MM-DD)", True),
     ("effective_until", "Expiry date (YYYY-MM-DD); blank means no scheduled expiry", False),
 ]
 
-VALID_OFFERING_TYPES = {"Physical Product", "Service", "Digital Product"}
+VALID_OFFERING_TYPES = {"Physical Product", "Service", "Digital Product", "Subscription"}
 VALID_PRODUCT_RECORD_STATUSES = {"Active", "Inactive", "Discontinued"}
 VALID_CLAIM_TYPES = {
     "Ingredient", "Nutritional", "Health", "Performance",
@@ -78,46 +78,113 @@ VALID_DISCLOSURE_RECORD_STATUSES = {"Active", "Inactive"}
 
 class ExcelImportService:
     """
-    Service for generating authoritative Excel templates, staging imports safely
-    without mutating active records, validating rows, and atomically committing.
+    Authoritative service for generating standardized Excel templates, staging imports safely
+    without mutating active records, validating rows with exact sheet/row/column error reporting,
+    and atomically committing verified data.
     """
 
     # -------------------------------------------------------------------------
-    # 1. TEMPLATE GENERATION
+    # 1. TEMPLATE GENERATION WITH INSTRUCTIONS WORKSHEET
     # -------------------------------------------------------------------------
 
     def generate_template(self, template_type: str) -> bytes:
-        """
-        Generates an authoritative, beautifully formatted Excel workbook (.xlsx)
-        with header styling, column widths, and sample demonstration rows.
-        """
         wb = openpyxl.Workbook()
-        # Remove default sheet
-        wb.remove(wb.active)
+        wb.remove(wb.active)  # Remove default blank sheet
 
-        header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+        # Styles
+        title_font = Font(name="Calibri", size=13, bold=True, color="186B42")
+        section_font = Font(name="Calibri", size=11, bold=True, color="1E293B")
+        header_font = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
         header_fill = PatternFill(start_color="186B42", end_color="186B42", fill_type="solid")
-        sample_font = Font(name="Calibri", size=10, italic=True, color="555555")
+        sub_header_fill = PatternFill(start_color="334155", end_color="334155", fill_type="solid")
+        sample_font = Font(name="Calibri", size=10, italic=True, color="475569")
+        regular_font = Font(name="Calibri", size=10, color="1E293B")
+        note_fill = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid")
         thin_border = Border(
-            left=Side(style='thin', color='DDDDDD'),
-            right=Side(style='thin', color='DDDDDD'),
-            top=Side(style='thin', color='DDDDDD'),
-            bottom=Side(style='thin', color='DDDDDD')
+            left=Side(style='thin', color='CBD5E1'),
+            right=Side(style='thin', color='CBD5E1'),
+            top=Side(style='thin', color='CBD5E1'),
+            bottom=Side(style='thin', color='CBD5E1')
         )
 
         if template_type == "product_catalogue":
+            # Sheet 1: Instructions
+            ws_inst = wb.create_sheet(title="Instructions")
+            ws_inst.append(["Inkloom AI — Product Catalogue Workbook Instructions"])
+            ws_inst.cell(row=1, column=1).font = title_font
+
+            ws_inst.append([])
+            ws_inst.append(["IMPORTANT USAGE & GOVERNANCE PRINCIPLES:"])
+            ws_inst.cell(row=3, column=1).font = section_font
+            ws_inst.append([
+                "1. Product vs SKU Rule: A product and its SKU are distinct. Distinct sellable variants (e.g. 250ml vs 1L) must be separate rows with their own SKU, sharing product_name."
+            ])
+            ws_inst.append([
+                "2. Product Facts vs Marketing Claims: Factual features or ingredients listed here do NOT authorise promotional marketing claims (e.g., '100% natural', 'sugar-free'). Claims must be authorised in the Claims Register."
+            ])
+            ws_inst.append([
+                "3. Applicable Market: Specify the country/region (e.g. 'India') or enter 'ALL' if universal across all target markets."
+            ])
+            ws_inst.append([
+                "4. Date Format: Where dates are used, use YYYY-MM-DD format (e.g. 2026-01-01)."
+            ])
+            ws_inst.append([
+                "5. Sample Data: Rows in the 'Product_Catalogue' sheet prefixed with [SAMPLE] demonstrate valid syntax and should be replaced with real organisation data."
+            ])
+            for r in range(4, 9):
+                ws_inst.cell(row=r, column=1).font = regular_font
+
+            ws_inst.append([])
+            ws_inst.append(["COLUMN SPECIFICATION & FIELD GUIDANCE:"])
+            ws_inst.cell(row=10, column=1).font = section_font
+
+            guide_headers = ["Column #", "Field Name", "Required?", "Accepted Values / Format", "Description & Field Guidance"]
+            ws_inst.append(guide_headers)
+            for col_idx in range(1, len(guide_headers) + 1):
+                c = ws_inst.cell(row=11, column=col_idx)
+                c.font = header_font
+                c.fill = sub_header_fill
+                c.alignment = Alignment(horizontal="center", vertical="center")
+
+            column_guidelines = [
+                ("1", "product_id", "Required", "Unique alphanumeric string", "Unique identifier for product within organisation (e.g. FS-P001). Foreign key for claims."),
+                ("2", "product_name", "Required", "Official product title", "Official commercial product name."),
+                ("3", "product_category", "Required", "Category name", "Category to which offering belongs (e.g. Fruit Beverage, Personal Care)."),
+                ("4", "offering_type", "Required", "Physical Product, Service, Digital Product, Subscription", "Must be explicitly specified to prevent silent misclassification of non-physical offerings (services, subscriptions, digital goods)."),
+                ("5", "product_description", "Required", "Clear factual text", "Official factual description of offering."),
+                ("6", "variant_name", "Optional", "Variant title", "Flavours, sizes, models, or packaging variations (e.g. 250 mL Glass Bottle)."),
+                ("7", "sku", "Required if variant", "Unique SKU code", "Stock keeping unit. Required when variant_name is provided. Must be unique within file."),
+                ("8", "pack_size", "Optional/Conditional", "Positive number (> 0)", "Net quantity or volume (e.g. 250, 1000). Must be positive."),
+                ("9", "pack_unit", "Optional/Conditional", "ml, L, g, kg, pieces, etc.", "Standard unit of measure for pack_size."),
+                ("10", "ingredients_components", "Optional/Conditional", "Semicolon/comma text", "Core ingredients or components. Factual statement only; does not authorise promotional claims."),
+                ("11", "key_features", "Optional", "Semicolon-delimited features", "Factual product features. Promotional marketing claims must be authorised separately in Claims Register."),
+                ("12", "specifications", "Optional", "Technical specs text", "Measurable technical details (e.g. storage temperature 2-5C, shelf life)."),
+                ("13", "known_limitations", "Optional", "Known restrictions/allergens", "Mandatory warnings, known exclusions, or allergen presence."),
+                ("14", "applicable_market", "Required", "Market name or ALL", "Jurisdiction where record applies (e.g. India, EU, ALL)."),
+                ("15", "record_status", "Required", "Active, Inactive, Discontinued", "Only 'Active' records are evaluated by the governance engine."),
+            ]
+            for row in column_guidelines:
+                ws_inst.append(list(row))
+                for col_idx in range(1, len(row) + 1):
+                    c = ws_inst.cell(row=ws_inst.max_row, column=col_idx)
+                    c.font = regular_font
+                    c.border = thin_border
+
+            for col in ws_inst.columns:
+                max_len = max(len(str(cell.value or '')) for cell in col)
+                col_letter = get_column_letter(col[0].column)
+                ws_inst.column_dimensions[col_letter].width = max(min(max_len + 3, 50), 12)
+
+            # Sheet 2: Product_Catalogue
             ws = wb.create_sheet(title="Product_Catalogue")
-            # Headers
             headers = [col[0] for col in PRODUCT_CATALOGUE_COLUMNS]
             ws.append(headers)
-
-            for col_num, col_name in enumerate(headers, 1):
+            for col_num in range(1, len(headers) + 1):
                 cell = ws.cell(row=1, column=col_num)
                 cell.font = header_font
                 cell.fill = header_fill
                 cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
-            # Sample demonstration rows
             sample_rows = [
                 [
                     "FS-P001", "Valencia Orange Cold-Pressed Juice", "Fruit Beverage",
@@ -151,14 +218,116 @@ class ExcelImportService:
                     c.font = sample_font
                     c.border = thin_border
 
-            # Auto-fit columns
             for col in ws.columns:
                 max_len = max(len(str(cell.value or '')) for cell in col)
                 col_letter = get_column_letter(col[0].column)
                 ws.column_dimensions[col_letter].width = max(max_len + 4, 15)
+            wb.active = ws
 
         elif template_type == "claims_and_disclosures":
-            # Sheet 1: Claims_Register
+            # Sheet 1: Instructions
+            ws_inst = wb.create_sheet(title="Instructions")
+            ws_inst.append(["Inkloom AI — Claims Register & Required Disclosures Workbook Instructions"])
+            ws_inst.cell(row=1, column=1).font = title_font
+
+            ws_inst.append([])
+            ws_inst.append(["CORE GOVERNANCE PRINCIPLES & CONDITIONAL VALIDATION:"])
+            ws_inst.cell(row=3, column=1).font = section_font
+            ws_inst.append([
+                "1. Claims Register vs Required Disclosures: Claims determine whether promotional statements are Approved, Restricted, or Prohibited. Required Disclosures are mandatory statements that MUST appear when specific triggers apply. They are separate concepts."
+            ])
+            ws_inst.append([
+                "2. Scope of 'ALL': Using 'ALL' in applicable_product_id scopes strictly to offerings within YOUR organisation. It never crosses tenant boundaries."
+            ])
+            ws_inst.append([
+                "3. Staged References & Import Sequence: Claims can reference newly staged products in the same session. Confirm your Product Catalogue before confirming Claims to ensure relational integrity."
+            ])
+            ws_inst.append([
+                "4. Date Semantics: Dates must use YYYY-MM-DD format. The effective_until end date is INCLUSIVE (effective_from <= current_date <= effective_until). Leaving effective_until blank indicates an ongoing claim with no scheduled expiration."
+            ])
+            ws_inst.append([
+                "3. Conditional Validation for Claims:"
+            ])
+            ws_inst.append([
+                "   - Approved: claim_text required; cannot contradict with prohibited variations; restricted_conditions optional."
+            ])
+            ws_inst.append([
+                "   - Restricted: restricted_conditions MUST be provided. Governance engine verifies conditions before authorising."
+            ])
+            ws_inst.append([
+                "   - Prohibited: Strictly disallowed. approved_variations MUST NOT be provided (contradiction error)."
+            ])
+            ws_inst.append([
+                "4. Date Format: Use YYYY-MM-DD (e.g. 2026-01-01). effective_until must be on or after effective_from."
+            ])
+            ws_inst.append([
+                "5. Unregistered Claims: Promotional claims not found in this register will be flagged as 'Not found in Claims Register' (not falsely marked as false)."
+            ])
+            for r in range(4, 12):
+                ws_inst.cell(row=r, column=1).font = regular_font
+
+            ws_inst.append([])
+            ws_inst.append(["CLAIMS REGISTER (SHEET 2) COLUMN GUIDANCE:"])
+            ws_inst.cell(row=13, column=1).font = section_font
+
+            guide_headers = ["Column #", "Field Name", "Required?", "Accepted Values / Format", "Description & Field Guidance"]
+            ws_inst.append(guide_headers)
+            for col_idx in range(1, len(guide_headers) + 1):
+                c = ws_inst.cell(row=14, column=col_idx)
+                c.font = header_font
+                c.fill = sub_header_fill
+
+            claims_guide = [
+                ("1", "claim_id", "Required", "Unique alphanumeric string", "Unique claim ID within organisation (e.g. CLM001)."),
+                ("2", "claim_text", "Required", "Exact official claim statement", "The core promotional statement being governed."),
+                ("3", "claim_type", "Required", "Ingredient, Nutritional, Health, Performance, Quality, Comparative, Environmental, Endorsement, Origin, Safety, Other", "Formal classification of claim."),
+                ("4", "claim_status", "Required", "Approved, Restricted, Prohibited", "Status determining authorisation enforcement."),
+                ("5", "applicable_product_id", "Required", "Valid product_id or ALL", "Product SKU or 'ALL' (tenant-scoped). Must exist in active catalogue."),
+                ("6", "approved_variations", "Optional (Forbidden for Prohibited)", "Semicolon or newline text", "Authorised alternative phrases. Must not extend claim meaning."),
+                ("7", "restricted_conditions", "Mandatory for Restricted claims", "Condition text", "Preconditions, qualifying statements, or disclaimers required for use."),
+                ("8", "prohibited_variations", "Optional", "Semicolon or newline text", "Known wording variants that organisation explicitly disallows."),
+                ("9", "applicable_market", "Required", "Market name or ALL", "Jurisdiction where claim authorisation applies."),
+                ("10", "effective_from", "Required", "Date YYYY-MM-DD", "Date authorisation begins. Future dates cannot be authorised yet."),
+                ("11", "effective_until", "Optional", "Date YYYY-MM-DD", "Expiry date (>= effective_from). Expired claims cannot be authorised."),
+            ]
+            for row in claims_guide:
+                ws_inst.append(list(row))
+                for col_idx in range(1, len(row) + 1):
+                    c = ws_inst.cell(row=ws_inst.max_row, column=col_idx)
+                    c.font = regular_font
+                    c.border = thin_border
+
+            ws_inst.append([])
+            ws_inst.append(["REQUIRED DISCLOSURES (SHEET 3) COLUMN GUIDANCE:"])
+            ws_inst.cell(row=ws_inst.max_row, column=1).font = section_font
+            ws_inst.append(guide_headers)
+            for col_idx in range(1, len(guide_headers) + 1):
+                c = ws_inst.cell(row=ws_inst.max_row, column=col_idx)
+                c.font = header_font
+                c.fill = sub_header_fill
+
+            disc_guide = [
+                ("1", "disclosure_id", "Required", "Unique alphanumeric string", "Unique disclosure ID (e.g. DISC001)."),
+                ("2", "disclosure_text", "Required", "Exact mandatory wording", "Exact statement required to appear on packaging/collateral."),
+                ("3", "applicable_product_id", "Required", "Valid product_id or ALL", "Target product or ALL within organisation."),
+                ("4", "applicable_market", "Required", "Market name or ALL", "Jurisdiction where disclosure applies."),
+                ("5", "applies_when", "Required", "Condition text", "Documented scenario triggering mandatory inclusion."),
+                ("6", "effective_from", "Required", "Date YYYY-MM-DD", "Date disclosure takes effect."),
+                ("7", "effective_until", "Optional", "Date YYYY-MM-DD", "Expiry date (>= effective_from)."),
+            ]
+            for row in disc_guide:
+                ws_inst.append(list(row))
+                for col_idx in range(1, len(row) + 1):
+                    c = ws_inst.cell(row=ws_inst.max_row, column=col_idx)
+                    c.font = regular_font
+                    c.border = thin_border
+
+            for col in ws_inst.columns:
+                max_len = max(len(str(cell.value or '')) for cell in col)
+                col_letter = get_column_letter(col[0].column)
+                ws_inst.column_dimensions[col_letter].width = max(min(max_len + 3, 50), 12)
+
+            # Sheet 2: Claims_Register
             ws_claims = wb.create_sheet(title="Claims_Register")
             claims_headers = [col[0] for col in CLAIMS_REGISTER_COLUMNS]
             ws_claims.append(claims_headers)
@@ -196,11 +365,11 @@ class ExcelImportService:
                 col_letter = get_column_letter(col[0].column)
                 ws_claims.column_dimensions[col_letter].width = max(max_len + 4, 15)
 
-            # Sheet 2: Required_Disclosures (Optional Sheet)
+            # Sheet 3: Required_Disclosures
             ws_disc = wb.create_sheet(title="Required_Disclosures")
             disc_headers = [col[0] for col in REQUIRED_DISCLOSURES_COLUMNS]
             ws_disc.append(disc_headers)
-            disc_fill = PatternFill(start_color="282828", end_color="282828", fill_type="solid")
+            disc_fill = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
             for col_num in range(1, len(disc_headers) + 1):
                 c = ws_disc.cell(row=1, column=col_num)
                 c.font = header_font
@@ -230,6 +399,7 @@ class ExcelImportService:
                 max_len = max(len(str(cell.value or '')) for cell in col)
                 col_letter = get_column_letter(col[0].column)
                 ws_disc.column_dimensions[col_letter].width = max(max_len + 4, 15)
+            wb.active = ws_claims
 
         buf = io.BytesIO()
         wb.save(buf)
@@ -249,21 +419,14 @@ class ExcelImportService:
         idempotency_key: str,
         import_type: str
     ) -> StagedImport:
-        """
-        Parses an uploaded Excel file, validates headers, checks column constraints,
-        and saves staged row models. Active tables are NOT modified.
-        Idempotency key prevents duplicate submission within the same organization.
-        """
         file_hash = hashlib.sha256(file_bytes).hexdigest()
 
-        # Idempotency check: Return existing staged import if matching key exists
         existing_import = db.query(StagedImport).filter(
             StagedImport.organization_id == org_id,
             StagedImport.idempotency_key == idempotency_key
         ).first()
 
         if existing_import:
-            # If already committed, return it
             return existing_import
 
         staged_import = StagedImport(
@@ -337,7 +500,6 @@ class ExcelImportService:
         expected_cols = [c[0] for c in PRODUCT_CATALOGUE_COLUMNS]
         col_index_map = {col.lower(): idx for idx, col in enumerate(header_row)}
 
-        # Check required columns presence
         missing_headers = [c for c in expected_cols if c.lower() not in col_index_map]
         if missing_headers:
             staged_import.status = "failed"
@@ -347,12 +509,12 @@ class ExcelImportService:
             return
 
         seen_product_ids = set()
+        seen_skus = set()
         total_rows = 0
         valid_rows = 0
         error_rows = 0
 
         for row_idx, row_values in enumerate(rows[1:], start=2):
-            # Skip empty rows
             if not any(v is not None and str(v).strip() != '' for v in row_values):
                 continue
 
@@ -368,9 +530,9 @@ class ExcelImportService:
             # 1. product_id
             p_id = str(raw_dict.get("product_id") or '').strip()
             if not p_id:
-                row_errors.append("Column 'product_id' is required and cannot be empty")
+                row_errors.append(f"[Product_Catalogue] Row {row_idx}, Column 'product_id': Unique identifier is required")
             elif p_id in seen_product_ids:
-                row_errors.append(f"Duplicate product_id '{p_id}' within this import file")
+                row_errors.append(f"[Product_Catalogue] Row {row_idx}, Column 'product_id': Duplicate product_id '{p_id}' within this import file")
             else:
                 seen_product_ids.add(p_id)
             parsed_data["product_id"] = p_id
@@ -378,39 +540,60 @@ class ExcelImportService:
             # 2. product_name
             p_name = str(raw_dict.get("product_name") or '').strip()
             if not p_name:
-                row_errors.append("Column 'product_name' is required")
+                row_errors.append(f"[Product_Catalogue] Row {row_idx}, Column 'product_name': Product name is required")
             parsed_data["product_name"] = p_name
 
             # 3. product_category
             p_cat = str(raw_dict.get("product_category") or '').strip()
             if not p_cat:
-                row_errors.append("Column 'product_category' is required")
+                row_errors.append(f"[Product_Catalogue] Row {row_idx}, Column 'product_category': Category is required")
             parsed_data["product_category"] = p_cat
 
-            # 4. offering_type
+            # 4. offering_type (Required: Physical Product, Service, Digital Product, Subscription)
             off_type_raw = str(raw_dict.get("offering_type") or '').strip()
-            off_type = next((v for v in VALID_OFFERING_TYPES if v.lower() == off_type_raw.lower()), off_type_raw)
-            if off_type not in VALID_OFFERING_TYPES:
-                row_errors.append(f"Invalid offering_type '{off_type_raw}'. Permitted: {', '.join(VALID_OFFERING_TYPES)}")
+            if not off_type_raw:
+                row_errors.append(f"[Product_Catalogue] Row {row_idx}, Column 'offering_type': offering_type is required. Permitted values: {', '.join(sorted(VALID_OFFERING_TYPES))}")
+                off_type = "Physical Product"
+            else:
+                off_type = next((v for v in VALID_OFFERING_TYPES if v.lower() == off_type_raw.lower()), off_type_raw)
+                if off_type not in VALID_OFFERING_TYPES:
+                    row_errors.append(f"[Product_Catalogue] Row {row_idx}, Column 'offering_type': Invalid offering_type '{off_type_raw}'. Permitted: {', '.join(sorted(VALID_OFFERING_TYPES))}")
             parsed_data["offering_type"] = off_type
 
             # 5. product_description
             p_desc = str(raw_dict.get("product_description") or '').strip()
             if not p_desc:
-                row_errors.append("Column 'product_description' is required")
+                row_errors.append(f"[Product_Catalogue] Row {row_idx}, Column 'product_description': Description is required")
             parsed_data["product_description"] = p_desc
 
-            # 6. variant_name, sku
-            parsed_data["variant_name"] = str(raw_dict.get("variant_name") or '').strip() or None
-            parsed_data["sku"] = str(raw_dict.get("sku") or '').strip() or None
+            # 6. variant_name & sku (Product-variant rule: if variant_name provided, sku is required)
+            v_name = str(raw_dict.get("variant_name") or '').strip() or None
+            sku_val = str(raw_dict.get("sku") or '').strip() or None
 
-            # 7. pack_size, pack_unit
+            if v_name and not sku_val:
+                row_errors.append(f"[Product_Catalogue] Row {row_idx}, Column 'sku': SKU is required when variant_name is specified")
+
+            if sku_val:
+                if sku_val in seen_skus:
+                    row_errors.append(f"[Product_Catalogue] Row {row_idx}, Column 'sku': Duplicate SKU '{sku_val}' within this import file")
+                else:
+                    seen_skus.add(sku_val)
+
+            parsed_data["variant_name"] = v_name
+            parsed_data["sku"] = sku_val
+
+            # 7. pack_size & pack_unit
             pack_size_val = raw_dict.get("pack_size")
             if pack_size_val is not None and str(pack_size_val).strip() != '':
                 try:
-                    parsed_data["pack_size"] = float(pack_size_val)
-                except ValueError:
-                    row_errors.append(f"Invalid numeric pack_size: '{pack_size_val}'")
+                    ps_float = float(pack_size_val)
+                    if ps_float <= 0:
+                        row_errors.append(f"[Product_Catalogue] Row {row_idx}, Column 'pack_size': pack_size must be a positive number (> 0), got: '{pack_size_val}'")
+                        parsed_data["pack_size"] = None
+                    else:
+                        parsed_data["pack_size"] = ps_float
+                except (ValueError, TypeError):
+                    row_errors.append(f"[Product_Catalogue] Row {row_idx}, Column 'pack_size': Invalid numeric pack_size: '{pack_size_val}'")
                     parsed_data["pack_size"] = None
             else:
                 parsed_data["pack_size"] = None
@@ -424,14 +607,14 @@ class ExcelImportService:
             # 8. applicable_market
             market = str(raw_dict.get("applicable_market") or '').strip()
             if not market:
-                row_errors.append("Column 'applicable_market' is required")
+                row_errors.append(f"[Product_Catalogue] Row {row_idx}, Column 'applicable_market': Market is required (specify market or 'ALL')")
             parsed_data["applicable_market"] = market
 
             # 9. record_status
             status_val_raw = str(raw_dict.get("record_status") or 'Active').strip()
             status_val = next((v for v in VALID_PRODUCT_RECORD_STATUSES if v.lower() == status_val_raw.lower()), status_val_raw)
             if status_val not in VALID_PRODUCT_RECORD_STATUSES:
-                row_errors.append(f"Invalid record_status '{status_val_raw}'. Permitted: {', '.join(VALID_PRODUCT_RECORD_STATUSES)}")
+                row_errors.append(f"[Product_Catalogue] Row {row_idx}, Column 'record_status': Invalid record_status '{status_val_raw}'. Permitted: {', '.join(sorted(VALID_PRODUCT_RECORD_STATUSES))}")
             parsed_data["record_status"] = status_val
 
             is_valid = len(row_errors) == 0
@@ -506,6 +689,20 @@ class ExcelImportService:
         active_products = db.query(Product).filter(Product.organization_id == org_id).all()
         known_product_ids = {p.product_id for p in active_products}
 
+        # Also include products staged in pending, valid Product Catalogue imports for this organization
+        staged_product_rows = db.query(StagedImportProductRow).join(
+            StagedImport, StagedImportProductRow.import_id == StagedImport.id
+        ).filter(
+            StagedImport.organization_id == org_id,
+            StagedImport.status == "pending_preview",
+            StagedImport.import_type == "product_catalogue",
+            StagedImportProductRow.is_valid == True
+        ).all()
+        for spr in staged_product_rows:
+            p_id = spr.parsed_data.get("product_id") if spr.parsed_data else None
+            if p_id:
+                known_product_ids.add(p_id)
+
         seen_claim_ids = set()
         total_rows = 0
         valid_rows = 0
@@ -527,9 +724,9 @@ class ExcelImportService:
             # claim_id
             c_id = str(raw_dict.get("claim_id") or '').strip()
             if not c_id:
-                row_errors.append("Column 'claim_id' is required")
+                row_errors.append(f"[Claims_Register] Row {row_idx}, Column 'claim_id': Claim ID is required")
             elif c_id in seen_claim_ids:
-                row_errors.append(f"Duplicate claim_id '{c_id}' within this import file")
+                row_errors.append(f"[Claims_Register] Row {row_idx}, Column 'claim_id': Duplicate claim_id '{c_id}' within this import file")
             else:
                 seen_claim_ids.add(c_id)
             parsed_data["claim_id"] = c_id
@@ -537,60 +734,69 @@ class ExcelImportService:
             # claim_text
             c_text = str(raw_dict.get("claim_text") or '').strip()
             if not c_text:
-                row_errors.append("Column 'claim_text' is required")
+                row_errors.append(f"[Claims_Register] Row {row_idx}, Column 'claim_text': Claim text is required")
             parsed_data["claim_text"] = c_text
 
             # claim_type
-            c_type = str(raw_dict.get("claim_type") or '').strip()
-            # Title case comparison for safety
-            normalized_type = c_type.capitalize()
+            c_type_raw = str(raw_dict.get("claim_type") or '').strip()
+            normalized_type = next((v for v in VALID_CLAIM_TYPES if v.lower() == c_type_raw.lower()), c_type_raw)
             if normalized_type not in VALID_CLAIM_TYPES:
-                row_errors.append(f"Invalid claim_type '{c_type}'. Permitted: {', '.join(sorted(VALID_CLAIM_TYPES))}")
+                row_errors.append(f"[Claims_Register] Row {row_idx}, Column 'claim_type': Invalid claim_type '{c_type_raw}'. Permitted: {', '.join(sorted(VALID_CLAIM_TYPES))}")
             parsed_data["claim_type"] = normalized_type
 
             # claim_status
-            c_status = str(raw_dict.get("claim_status") or '').strip().capitalize()
+            c_status_raw = str(raw_dict.get("claim_status") or '').strip()
+            c_status = next((v for v in VALID_CLAIM_STATUSES if v.lower() == c_status_raw.lower()), c_status_raw)
             if c_status not in VALID_CLAIM_STATUSES:
-                row_errors.append(f"Invalid claim_status '{c_status}'. Permitted: {', '.join(VALID_CLAIM_STATUSES)}")
+                row_errors.append(f"[Claims_Register] Row {row_idx}, Column 'claim_status': Invalid claim_status '{c_status_raw}'. Permitted: {', '.join(sorted(VALID_CLAIM_STATUSES))}")
             parsed_data["claim_status"] = c_status
 
-            # applicable_product_id
+            # applicable_product_id (Validate against active organisation catalogue or 'ALL')
             app_prod = str(raw_dict.get("applicable_product_id") or '').strip()
             if not app_prod:
-                row_errors.append("Column 'applicable_product_id' is required (enter product_id or 'ALL')")
+                row_errors.append(f"[Claims_Register] Row {row_idx}, Column 'applicable_product_id': Product reference is required (enter product_id or 'ALL')")
             elif app_prod != "ALL" and app_prod not in known_product_ids:
-                row_errors.append(f"Referenced product_id '{app_prod}' not found in active organisation catalogue")
+                row_errors.append(f"[Claims_Register] Row {row_idx}, Column 'applicable_product_id': Referenced product_id '{app_prod}' not found in active organisation catalogue")
             parsed_data["applicable_product_id"] = app_prod
 
-            # restricted_conditions
-            restr_cond = str(raw_dict.get("restricted_conditions") or '').strip()
-            if c_status == "Restricted" and not restr_cond:
-                row_errors.append("Restricted claims must specify 'restricted_conditions'")
-            parsed_data["restricted_conditions"] = restr_cond or None
+            # approved_variations & prohibited_variations
+            app_var = str(raw_dict.get("approved_variations") or '').strip() or None
+            proh_var = str(raw_dict.get("prohibited_variations") or '').strip() or None
 
-            parsed_data["approved_variations"] = str(raw_dict.get("approved_variations") or '').strip() or None
-            parsed_data["prohibited_variations"] = str(raw_dict.get("prohibited_variations") or '').strip() or None
+            # Conditional Validation:
+            # - Restricted claims MUST specify restricted_conditions
+            restr_cond = str(raw_dict.get("restricted_conditions") or '').strip() or None
+            if c_status == "Restricted" and not restr_cond:
+                row_errors.append(f"[Claims_Register] Row {row_idx}, Column 'restricted_conditions': Restricted claims must specify 'restricted_conditions'")
+
+            # - Prohibited claims CANNOT contain approved_variations (contradiction)
+            if c_status == "Prohibited" and app_var:
+                row_errors.append(f"[Claims_Register] Row {row_idx}, Column 'approved_variations': Prohibited claims cannot contain approved_variations (contradiction)")
+
+            parsed_data["approved_variations"] = app_var
+            parsed_data["restricted_conditions"] = restr_cond
+            parsed_data["prohibited_variations"] = proh_var
 
             # applicable_market
             market = str(raw_dict.get("applicable_market") or '').strip()
             if not market:
-                row_errors.append("Column 'applicable_market' is required")
+                row_errors.append(f"[Claims_Register] Row {row_idx}, Column 'applicable_market': Market is required")
             parsed_data["applicable_market"] = market
 
             # effective_from
             eff_from_val = raw_dict.get("effective_from")
             parsed_eff_from = self._parse_date(eff_from_val)
             if not parsed_eff_from:
-                row_errors.append(f"Column 'effective_from' must be a valid date (YYYY-MM-DD), got: '{eff_from_val}'")
+                row_errors.append(f"[Claims_Register] Row {row_idx}, Column 'effective_from': Must be a valid date (YYYY-MM-DD), got: '{eff_from_val}'")
             parsed_data["effective_from"] = parsed_eff_from.isoformat() if parsed_eff_from else None
 
-            # effective_until
+            # effective_until (Optional; if present, must be >= effective_from)
             eff_until_val = raw_dict.get("effective_until")
             parsed_eff_until = self._parse_date(eff_until_val) if eff_until_val else None
             if eff_until_val and not parsed_eff_until:
-                row_errors.append(f"Column 'effective_until' must be a valid date (YYYY-MM-DD), got: '{eff_until_val}'")
+                row_errors.append(f"[Claims_Register] Row {row_idx}, Column 'effective_until': Must be a valid date (YYYY-MM-DD), got: '{eff_until_val}'")
             elif parsed_eff_from and parsed_eff_until and parsed_eff_until < parsed_eff_from:
-                row_errors.append(f"effective_until ({parsed_eff_until}) cannot be earlier than effective_from ({parsed_eff_from})")
+                row_errors.append(f"[Claims_Register] Row {row_idx}, Column 'effective_until': effective_until ({parsed_eff_until}) cannot be earlier than effective_from ({parsed_eff_from})")
             parsed_data["effective_until"] = parsed_eff_until.isoformat() if parsed_eff_until else None
 
             is_valid = len(row_errors) == 0
@@ -644,9 +850,9 @@ class ExcelImportService:
                     # disclosure_id
                     d_id = str(raw_dict.get("disclosure_id") or '').strip()
                     if not d_id:
-                        row_errors.append("Column 'disclosure_id' is required")
+                        row_errors.append(f"[Required_Disclosures] Row {row_idx}, Column 'disclosure_id': Disclosure ID is required")
                     elif d_id in seen_disc_ids:
-                        row_errors.append(f"Duplicate disclosure_id '{d_id}'")
+                        row_errors.append(f"[Required_Disclosures] Row {row_idx}, Column 'disclosure_id': Duplicate disclosure_id '{d_id}' within this import file")
                     else:
                         seen_disc_ids.add(d_id)
                     parsed_data["disclosure_id"] = d_id
@@ -654,43 +860,43 @@ class ExcelImportService:
                     # disclosure_text
                     d_text = str(raw_dict.get("disclosure_text") or '').strip()
                     if not d_text:
-                        row_errors.append("Column 'disclosure_text' is required")
+                        row_errors.append(f"[Required_Disclosures] Row {row_idx}, Column 'disclosure_text': Disclosure text is required")
                     parsed_data["disclosure_text"] = d_text
 
                     # applicable_product_id
                     app_prod = str(raw_dict.get("applicable_product_id") or '').strip()
                     if not app_prod:
-                        row_errors.append("Column 'applicable_product_id' is required (enter product_id or 'ALL')")
+                        row_errors.append(f"[Required_Disclosures] Row {row_idx}, Column 'applicable_product_id': Product reference is required (enter product_id or 'ALL')")
                     elif app_prod != "ALL" and app_prod not in known_product_ids:
-                        row_errors.append(f"Referenced product_id '{app_prod}' not found in active organisation catalogue")
+                        row_errors.append(f"[Required_Disclosures] Row {row_idx}, Column 'applicable_product_id': Referenced product_id '{app_prod}' not found in active organisation catalogue")
                     parsed_data["applicable_product_id"] = app_prod
 
                     # applicable_market
                     market = str(raw_dict.get("applicable_market") or '').strip()
                     if not market:
-                        row_errors.append("Column 'applicable_market' is required")
+                        row_errors.append(f"[Required_Disclosures] Row {row_idx}, Column 'applicable_market': Market is required")
                     parsed_data["applicable_market"] = market
 
                     # applies_when
                     app_when = str(raw_dict.get("applies_when") or '').strip()
                     if not app_when:
-                        row_errors.append("Column 'applies_when' is required")
+                        row_errors.append(f"[Required_Disclosures] Row {row_idx}, Column 'applies_when': Trigger condition is required")
                     parsed_data["applies_when"] = app_when
 
                     # effective_from
                     eff_from_val = raw_dict.get("effective_from")
                     parsed_eff_from = self._parse_date(eff_from_val)
                     if not parsed_eff_from:
-                        row_errors.append(f"Column 'effective_from' must be a valid date (YYYY-MM-DD), got: '{eff_from_val}'")
+                        row_errors.append(f"[Required_Disclosures] Row {row_idx}, Column 'effective_from': Must be a valid date (YYYY-MM-DD), got: '{eff_from_val}'")
                     parsed_data["effective_from"] = parsed_eff_from.isoformat() if parsed_eff_from else None
 
                     # effective_until
                     eff_until_val = raw_dict.get("effective_until")
                     parsed_eff_until = self._parse_date(eff_until_val) if eff_until_val else None
                     if eff_until_val and not parsed_eff_until:
-                        row_errors.append(f"Column 'effective_until' must be a valid date (YYYY-MM-DD), got: '{eff_until_val}'")
+                        row_errors.append(f"[Required_Disclosures] Row {row_idx}, Column 'effective_until': Must be a valid date (YYYY-MM-DD), got: '{eff_until_val}'")
                     elif parsed_eff_from and parsed_eff_until and parsed_eff_until < parsed_eff_from:
-                        row_errors.append(f"effective_until ({parsed_eff_until}) cannot be earlier than effective_from ({parsed_eff_from})")
+                        row_errors.append(f"[Required_Disclosures] Row {row_idx}, Column 'effective_until': effective_until ({parsed_eff_until}) cannot be earlier than effective_from ({parsed_eff_from})")
                     parsed_data["effective_until"] = parsed_eff_until.isoformat() if parsed_eff_until else None
 
                     is_valid = len(row_errors) == 0
@@ -733,11 +939,6 @@ class ExcelImportService:
         import_id: str,
         user_id: Optional[str]
     ) -> Dict[str, Any]:
-        """
-        Commits an exact validated staged import atomically within a database transaction.
-        If any row fails or if validation errors exist, the entire transaction is rolled back,
-        leaving the existing active dataset unchanged.
-        """
         staged_import = db.query(StagedImport).filter(
             StagedImport.organization_id == org_id,
             StagedImport.id == import_id
@@ -829,7 +1030,6 @@ class ExcelImportService:
                 }
 
             elif staged_import.import_type == "claims_and_disclosures":
-                # Staged Claims
                 staged_claims = db.query(StagedImportClaimRow).filter(
                     StagedImportClaimRow.organization_id == org_id,
                     StagedImportClaimRow.import_id == import_id,
@@ -842,7 +1042,6 @@ class ExcelImportService:
                     c_id = data["claim_id"]
                     app_prod = data["applicable_product_id"]
 
-                    # Resolve internal product UUID if not 'ALL'
                     internal_prod_id = None
                     if app_prod != "ALL":
                         prod_match = db.query(Product).filter(
@@ -892,7 +1091,6 @@ class ExcelImportService:
                         db.add(new_claim)
                     committed_claims += 1
 
-                # Staged Disclosures (Committed ATOMICALLY with Claims)
                 committed_disclosures = 0
                 if staged_import.has_disclosures:
                     staged_disclosures = db.query(StagedImportDisclosureRow).filter(
@@ -968,7 +1166,6 @@ class ExcelImportService:
             raise RuntimeError(f"Atomic commit failed and rolled back cleanly: {str(e)}")
 
     def discard_staged_import(self, db: Session, org_id: str, import_id: str):
-        """Marks a staged import as discarded."""
         staged_import = db.query(StagedImport).filter(
             StagedImport.organization_id == org_id,
             StagedImport.id == import_id
@@ -978,7 +1175,6 @@ class ExcelImportService:
             db.commit()
 
     def _parse_date(self, val: Any) -> Optional[date]:
-        """Safely parses dates from Excel (datetime objects, date objects, or YYYY-MM-DD strings)."""
         if val is None:
             return None
         if isinstance(val, datetime):

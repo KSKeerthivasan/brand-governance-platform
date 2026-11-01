@@ -1063,7 +1063,8 @@ async def preview_staged_excel_import(
                 raw_data=r.raw_data or {},
                 parsed_data=r.parsed_data,
                 validation_errors=r.validation_errors or [],
-                is_valid=r.is_valid
+                is_valid=r.is_valid,
+                sheet_name="Product_Catalogue"
             ))
     elif import_type == "claims_and_disclosures":
         c_rows = db.query(StagedImportClaimRow).filter(
@@ -1076,7 +1077,8 @@ async def preview_staged_excel_import(
                 raw_data=r.raw_data or {},
                 parsed_data=r.parsed_data,
                 validation_errors=r.validation_errors or [],
-                is_valid=r.is_valid
+                is_valid=r.is_valid,
+                sheet_name="Claims_Register"
             ))
         d_rows = db.query(StagedImportDisclosureRow).filter(
             StagedImportDisclosureRow.organization_id == org_id,
@@ -1088,7 +1090,8 @@ async def preview_staged_excel_import(
                 raw_data=r.raw_data or {},
                 parsed_data=r.parsed_data,
                 validation_errors=r.validation_errors or [],
-                is_valid=r.is_valid
+                is_valid=r.is_valid,
+                sheet_name="Required_Disclosures"
             ))
 
     out = StagedImportPreviewOut.model_validate(staged_import)
@@ -1126,7 +1129,8 @@ def get_staged_import_preview(
                 raw_data=r.raw_data or {},
                 parsed_data=r.parsed_data,
                 validation_errors=r.validation_errors or [],
-                is_valid=r.is_valid
+                is_valid=r.is_valid,
+                sheet_name="Product_Catalogue"
             ))
     elif staged_import.import_type == "claims_and_disclosures":
         c_rows = db.query(StagedImportClaimRow).filter(
@@ -1139,7 +1143,8 @@ def get_staged_import_preview(
                 raw_data=r.raw_data or {},
                 parsed_data=r.parsed_data,
                 validation_errors=r.validation_errors or [],
-                is_valid=r.is_valid
+                is_valid=r.is_valid,
+                sheet_name="Claims_Register"
             ))
         d_rows = db.query(StagedImportDisclosureRow).filter(
             StagedImportDisclosureRow.organization_id == org_id,
@@ -1151,7 +1156,8 @@ def get_staged_import_preview(
                 raw_data=r.raw_data or {},
                 parsed_data=r.parsed_data,
                 validation_errors=r.validation_errors or [],
-                is_valid=r.is_valid
+                is_valid=r.is_valid,
+                sheet_name="Required_Disclosures"
             ))
 
     out = StagedImportPreviewOut.model_validate(staged_import)

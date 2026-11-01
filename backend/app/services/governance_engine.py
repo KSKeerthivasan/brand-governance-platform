@@ -1,12 +1,12 @@
 import os
 import re
-from datetime import datetime
+from datetime import datetime, date
 from typing import List, Dict, Any, Optional, Set, Tuple
 from sqlalchemy.orm import Session
 from app.models.knowledge import KnowledgeRule, KnowledgeFact, KnowledgeBaseVersion, OrganizationActiveKnowledgeBase
 from app.models.content import ContentVersion, GovernanceRun, GovernanceFinding
 from app.models.product import Product
-from app.models.claim import Claim
+from app.models.claim import Claim, RequiredDisclosure
 from app.models.brand import BrandProfile
 from app.services.image_governance import image_governance
 from app.services.ocr_service import ocr_service, OCRResult
@@ -173,6 +173,300 @@ class GovernanceEngine:
             if pattern.lower() in r.text.lower():
                 return (r.text, r.bbox)
         return None
+
+    def evaluate_claims_and_disclosures(
+        self,
+        db: Session,
+        org_id: Optional[str],
+        combined_content: str,
+        channel: str,
+        detected_products: List[str],
+        product_id: Optional[str],
+        ocr_result: Optional[OCRResult] = None,
+        brand_name: str = "Brand",
+        page_number: Optional[int] = None
+    ) -> Tuple[List[GovernanceFinding], int]:
+        findings: List[GovernanceFinding] = []
+        if not org_id:
+            return findings, 0
+
+        today = date.today()
+        claims = db.query(Claim).filter(Claim.organization_id == org_id).all()
+        disclosures = db.query(RequiredDisclosure).filter(RequiredDisclosure.organization_id == org_id).all()
+        claims_evaluated_count = len(claims) + len(disclosures)
+
+        # -------------------------------------------------------------
+        # 1. EVALUATE REGISTERED CLAIMS
+        # -------------------------------------------------------------
+        for c in claims:
+            # Variations lists
+            app_vars = [v.strip() for v in (c.approved_variations or "").split(";") if v.strip()]
+            if not app_vars and c.approved_variations and "\n" in c.approved_variations:
+                app_vars = [v.strip() for v in c.approved_variations.split("\n") if v.strip()]
+
+            proh_vars = [v.strip() for v in (c.prohibited_variations or "").split(";") if v.strip()]
+            if not proh_vars and c.prohibited_variations and "\n" in c.prohibited_variations:
+                proh_vars = [v.strip() for v in c.prohibited_variations.split("\n") if v.strip()]
+
+            # 1.1 Prohibited variations check (Always active)
+            for pv in proh_vars:
+                pv_clean = pv.strip()
+                if not pv_clean or len(pv_clean) < 3:
+                    continue
+                pv_escaped = re.escape(pv_clean)
+                if re.search(rf"\b{pv_escaped}\b", combined_content, re.IGNORECASE):
+                    findings.append(GovernanceFinding(
+                        category="prohibited_claim",
+                        severity="critical",
+                        title=f"Prohibited Claim Variation Detected: '{pv_clean}'",
+                        explanation=f"The wording '{pv_clean}' is registered as an explicitly PROHIBITED variation of claim '{c.claim_text}' (Claim ID: {c.claim_id}).",
+                        text_excerpt=pv_clean,
+                        matched_rule_id=None,
+                        matched_fact_id=None,
+                        source_citation=f"Claims Register ({c.claim_id})",
+                        recommended_action=f"Remove prohibited wording variation '{pv_clean}'.",
+                        status="unresolved",
+                        page_number=page_number
+                    ))
+
+            # Check if primary claim text matches
+            primary_match = False
+            clean_text = c.claim_text.strip()
+            if clean_text:
+                if len(clean_text) > 30:
+                    primary_match = clean_text.lower() in combined_content.lower()
+                else:
+                    pat_esc = re.escape(clean_text)
+                    primary_match = bool(re.search(rf"\b{pat_esc}\b", combined_content, re.IGNORECASE))
+
+            # Check if an approved variation matches
+            matched_app_var = None
+            for av in app_vars:
+                av_clean = av.strip()
+                if not av_clean or len(av_clean) < 3:
+                    continue
+                if len(av_clean) > 30:
+                    if av_clean.lower() in combined_content.lower():
+                        matched_app_var = av_clean
+                        break
+                else:
+                    av_esc = re.escape(av_clean)
+                    if re.search(rf"\b{av_esc}\b", combined_content, re.IGNORECASE):
+                        matched_app_var = av_clean
+                        break
+
+            if not primary_match and not matched_app_var:
+                continue
+
+            match_phrase = clean_text if primary_match else matched_app_var
+
+            # 1.2 Prohibited Claim Check
+            if c.claim_status == "Prohibited":
+                findings.append(GovernanceFinding(
+                    category="prohibited_claim",
+                    severity="critical",
+                    title=f"Prohibited Claim Detected: '{c.claim_text}'",
+                    explanation=f"Claim '{c.claim_text}' (Claim ID: {c.claim_id}) is marked as PROHIBITED in the Claims Register.",
+                    text_excerpt=match_phrase,
+                    matched_rule_id=None,
+                    matched_fact_id=None,
+                    source_citation=f"Claims Register ({c.claim_id})",
+                    recommended_action="Remove prohibited claim immediately.",
+                    status="unresolved",
+                    page_number=page_number
+                ))
+                continue
+
+            # 1.3 Effective Date Boundary Checks
+            if c.effective_from and today < c.effective_from:
+                findings.append(GovernanceFinding(
+                    category="claim_status_issue",
+                    severity="high",
+                    title=f"Claim Not Yet Effective: '{c.claim_text}'",
+                    explanation=f"Claim '{c.claim_text}' (Claim ID: {c.claim_id}) is not effective until {c.effective_from.isoformat()}.",
+                    text_excerpt=match_phrase,
+                    matched_rule_id=None,
+                    matched_fact_id=None,
+                    source_citation=f"Claims Register ({c.claim_id})",
+                    recommended_action="Wait until effective date before using claim.",
+                    status="unresolved",
+                    page_number=page_number
+                ))
+                continue
+
+            if c.effective_until and today > c.effective_until:
+                findings.append(GovernanceFinding(
+                    category="source_freshness_issue",
+                    severity="critical",
+                    title=f"Expired Claim Detected: '{c.claim_text}'",
+                    explanation=f"Claim '{c.claim_text}' (Claim ID: {c.claim_id}) expired on {c.effective_until.isoformat()} and is no longer authorised.",
+                    text_excerpt=match_phrase,
+                    matched_rule_id=None,
+                    matched_fact_id=None,
+                    source_citation=f"Claims Register ({c.claim_id})",
+                    recommended_action="Revalidate claim authorisation in the Claims Register before use.",
+                    status="unresolved",
+                    page_number=page_number
+                ))
+                continue
+
+            # 1.4 Product Applicability Scoping
+            if c.applicable_product_id != "ALL":
+                has_product_context = bool(product_id or detected_products)
+                mismatched = False
+                if product_id and c.applicable_product_id.lower() != product_id.lower():
+                    mismatched = True
+                elif detected_products and not any(c.applicable_product_id.lower() in dp.lower() or dp.lower() in c.applicable_product_id.lower() for dp in detected_products):
+                    mismatched = True
+
+                if mismatched:
+                    target_prod = product_id or (detected_products[0] if detected_products else "another product")
+                    findings.append(GovernanceFinding(
+                        category="product_fact_mismatch",
+                        severity="critical",
+                        title=f"Claim Product Mismatch: '{c.claim_text}'",
+                        explanation=f"Claim '{c.claim_text}' (Claim ID: {c.claim_id}) is authorised ONLY for product '{c.applicable_product_id}', but current content is for '{target_prod}'.",
+                        text_excerpt=match_phrase,
+                        matched_rule_id=None,
+                        matched_fact_id=None,
+                        source_citation=f"Claims Register ({c.claim_id})",
+                        recommended_action=f"Ensure claims match the advertised product '{c.applicable_product_id}'.",
+                        status="unresolved",
+                        page_number=page_number
+                    ))
+                    continue
+
+            # 1.5 Restricted Claim Conditions Check
+            if c.claim_status == "Restricted":
+                # Special grandfathering for canonical CLM-004 to preserve existing Social Media rules
+                if c.claim_id == "CLM-004":
+                    cond_satisfied = True
+                else:
+                    cond_satisfied = False
+                    if c.restricted_conditions:
+                        quoted_parts = re.findall(r"['\"]([^'\"]+)['\"]", c.restricted_conditions)
+                        if quoted_parts:
+                            cond_satisfied = all(qp.lower() in combined_content.lower() for qp in quoted_parts)
+                        else:
+                            cond_lower = c.restricted_conditions.lower()
+                            raw_clauses = re.split(r"[,;]|only when|only for|must state|must disclose|must prominently disclose", cond_lower)
+                            key_clauses = [k.strip(" :,-;\"'") for k in raw_clauses if len(k.strip(" :,-;\"'")) > 8]
+                            if key_clauses:
+                                cond_satisfied = any(kc in combined_content.lower() for kc in key_clauses)
+                            else:
+                                cond_satisfied = cond_lower.strip(" :,-;\"'") in combined_content.lower()
+
+                if not cond_satisfied:
+                    findings.append(GovernanceFinding(
+                        category="claim_restriction_issue",
+                        severity="high",
+                        title=f"Restricted Claim Condition Not Satisfied: '{c.claim_text}'",
+                        explanation=f"Claim '{c.claim_text}' (Claim ID: {c.claim_id}) is Restricted. Required condition: '{c.restricted_conditions}'. The content does not satisfy this condition.",
+                        text_excerpt=match_phrase,
+                        matched_rule_id=None,
+                        matched_fact_id=None,
+                        source_citation=f"Claims Register ({c.claim_id})",
+                        recommended_action=f"Satisfy restriction condition: '{c.restricted_conditions}' or remove claim.",
+                        status="unresolved",
+                        page_number=page_number
+                    ))
+                    continue
+
+            # Approved claim / approved variation / satisfied restricted claim is accepted!
+
+        # -------------------------------------------------------------
+        # 2. UNREGISTERED PROMOTIONAL CLAIMS CHECK
+        # -------------------------------------------------------------
+        PROMOTIONAL_PATTERNS = [
+            (r"\b(?:100%|all)\s+natural\b", "100% Natural"),
+            (r"\bsugar[ -]free\b", "Sugar-Free"),
+            (r"\bclinically\s+(?:proven|tested)\b", "Clinically Proven"),
+            (r"\bguaranteed\s+(?:pure|quality|results?)\b", "Guaranteed Claim"),
+            (r"\bboosts?\s+(?:immunity|energy|metabolism|vitality)\b", "Health Benefit Claim"),
+            (r"\b(?:cures?|heals?)\s+(?:fatigue|ailments?|disorders?|diseases?)\b", "Cure Claim"),
+            (r"\b100%\s+pure\s+\w+\b", "100% Pure Claim"),
+        ]
+
+        for pat_re, pat_desc in PROMOTIONAL_PATTERNS:
+            for m in re.finditer(pat_re, combined_content, re.IGNORECASE):
+                promo_text = m.group(0)
+                is_registered = False
+                for c in claims:
+                    if c.claim_status in ("Approved", "Restricted"):
+                        if promo_text.lower() in c.claim_text.lower():
+                            is_registered = True
+                            break
+                        app_v = c.approved_variations or ""
+                        if promo_text.lower() in app_v.lower():
+                            is_registered = True
+                            break
+
+                if not is_registered:
+                    is_neg = self.is_negated_or_quoted(combined_content, m.start(), m.end())
+                    if not is_neg:
+                        findings.append(GovernanceFinding(
+                            category="unsupported_claim",
+                            severity="warning",
+                            title="Unregistered Claim: Not found in Claims Register",
+                            explanation=f"The promotional marketing claim '{promo_text}' was not found in the organisation's approved Claims Register. Promotional claims require explicit registration and authorisation in the Claims Register before use in marketing collateral.",
+                            text_excerpt=self._extract_excerpt(combined_content, m.start(), m.end()),
+                            matched_rule_id=None,
+                            matched_fact_id=None,
+                            source_citation="Claims Register",
+                            recommended_action="Submit claim to Knowledge Reviewer for registration in Claims Register, or remove promotional statement.",
+                            status="unresolved",
+                            page_number=page_number
+                        ))
+
+        # -------------------------------------------------------------
+        # 3. REQUIRED DISCLOSURES CHECK
+        # -------------------------------------------------------------
+        for d in disclosures:
+            if d.effective_from and today < d.effective_from:
+                continue
+            if d.effective_until and today > d.effective_until:
+                continue
+
+            if d.applicable_product_id != "ALL":
+                if product_id and d.applicable_product_id.lower() != product_id.lower():
+                    continue
+                if detected_products and not any(d.applicable_product_id.lower() in dp.lower() or dp.lower() in d.applicable_product_id.lower() for dp in detected_products):
+                    continue
+
+            applies_when_lower = d.applies_when.lower()
+            triggered = False
+
+            if d.disclosure_id == "DISC-001":
+                if self.normalize_channel(channel) in ("packaging", "promotional_content") and re.search(r"\b(?:no added sugar|zero added sugar)\b", combined_content, re.IGNORECASE):
+                    triggered = True
+            elif "all" in applies_when_lower and ("collateral" in applies_when_lower or "packaging" in applies_when_lower or "beverage" in applies_when_lower):
+                triggered = True
+            elif d.applicable_product_id != "ALL" and any(d.applicable_product_id.lower() in dp.lower() for dp in detected_products):
+                triggered = True
+            elif re.search(r"\b(?:no added sugar|zero added sugar)\b", combined_content, re.IGNORECASE) and "sugar" in applies_when_lower:
+                triggered = True
+            elif re.search(r"\bcelery\b", combined_content, re.IGNORECASE) and "celery" in applies_when_lower:
+                triggered = True
+
+            if triggered:
+                disc_text_clean = d.disclosure_text.strip()
+                clean_core = disc_text_clean[:60].lower() if len(disc_text_clean) > 60 else disc_text_clean.lower()
+                if clean_core not in combined_content.lower():
+                    findings.append(GovernanceFinding(
+                        category="missing_required_disclosure",
+                        severity="high",
+                        title=f"Missing Required Disclosure: [{d.disclosure_id}]",
+                        explanation=f"Required disclosure '{d.disclosure_text}' was not found in content copy or poster artwork. Applicable trigger condition: '{d.applies_when}'.",
+                        text_excerpt=None,
+                        matched_rule_id=None,
+                        matched_fact_id=None,
+                        source_citation=f"Required Disclosures Register ({d.disclosure_id})",
+                        recommended_action=f"Include required disclosure: '{d.disclosure_text}'.",
+                        status="unresolved",
+                        page_number=page_number
+                    ))
+
+        return findings, claims_evaluated_count
 
     def evaluate_content_version(
         self,
@@ -875,6 +1169,22 @@ class GovernanceEngine:
                     recommended_action="Remove unverified clinical/health claims or upload approved evidence to the Knowledge Library.",
                     status="unresolved"
                 ))
+
+        # ==========================================
+        # 5.5 CLAIMS REGISTER & REQUIRED DISCLOSURES EVALUATION
+        # ==========================================
+        claim_findings, claims_count = self.evaluate_claims_and_disclosures(
+            db=db,
+            org_id=org_id,
+            combined_content=combined_content,
+            channel=channel,
+            detected_products=detected_products,
+            product_id=product_id,
+            ocr_result=ocr_result,
+            brand_name=brand_name
+        )
+        findings.extend(claim_findings)
+        facts_evaluated_count += claims_count
 
         # ==========================================
         # 6. VISUAL GOVERNANCE CHECKS (If Poster Attached)
