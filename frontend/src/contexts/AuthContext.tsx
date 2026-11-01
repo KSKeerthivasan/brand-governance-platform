@@ -15,6 +15,7 @@ interface AuthContextType extends AuthState {
     admin_email: string;
     admin_password: string;
   }) => Promise<void>;
+  setSessionFromTokenResponse: (res: any) => void;
   logout: () => void;
   loading: boolean;
 }
@@ -168,6 +169,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const setSessionFromTokenResponse = (res: any) => {
+    api.setAuth(res.access_token, res.organization_id);
+    setAuthState({
+      token: res.access_token,
+      user: res.user,
+      organizationId: res.organization_id,
+      organizationName: res.organization_name,
+      organizationSlug: res.organization_slug,
+      role: res.role,
+      isDemo: Boolean(res.is_demo),
+      isAuthenticated: true,
+    });
+  };
+
   const logout = async () => {
     try {
       await api.logout();
@@ -185,7 +200,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ ...authState, login, switchOrg, switchPersona, onboard, logout, loading }}>
+    <AuthContext.Provider value={{ ...authState, login, switchOrg, switchPersona, onboard, setSessionFromTokenResponse, logout, loading }}>
       {children}
     </AuthContext.Provider>
   );

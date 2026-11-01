@@ -161,6 +161,7 @@ export interface ContentItem {
   id: string;
   organization_id: string;
   brand_id: string;
+  product_id?: string;
   created_by: string;
   title: string;
   channel: string;
@@ -431,3 +432,116 @@ export interface AmbiguityReportData {
   data_available: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// ROUND 3: STRUCTURED KNOWLEDGE, EXCEL STAGING & INVITATIONS
+// ---------------------------------------------------------------------------
+
+export interface BrandColor {
+  id?: string;
+  name: string;
+  hex_code: string;
+  role: 'primary' | 'secondary' | 'accent' | 'background' | 'other';
+  pantone?: string;
+  cmyk?: string;
+  rgb?: string;
+  usage_instructions?: string;
+}
+
+export interface BrandProfile {
+  id?: string;
+  organization_id?: string;
+  brand_name: string;
+  brand_description?: string;
+  approved_taglines?: string[];
+  brand_personality?: string[];
+  preferred_tone?: string[];
+  tones_to_avoid?: string[];
+  preferred_terminology?: string[];
+  prohibited_terminology?: string[];
+  writing_style: string;
+  approved_languages?: string[];
+  primary_heading_font?: string;
+  secondary_body_font?: string;
+  additional_approved_fonts?: string[];
+  typography_instructions?: string;
+  visual_style?: string[];
+  preferred_imagery_style?: string[];
+  preferred_backgrounds?: string[];
+  visual_styles_to_avoid?: string[];
+  logo_usage_instructions?: string;
+  colors?: BrandColor[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface StagedRowPreview {
+  row_number: number;
+  sheet_name?: string;
+  raw_data: Record<string, any>;
+  parsed_data?: Record<string, any>;
+  validation_errors: string[];
+  is_valid: boolean;
+}
+
+export interface StagedImportPreview {
+  id: string;
+  organization_id: string;
+  import_type: 'product_catalogue' | 'claims_and_disclosures';
+  file_name: string;
+  file_sha256: string;
+  status: 'pending_preview' | 'committed' | 'failed' | 'discarded';
+  total_rows: number;
+  valid_rows: number;
+  error_rows: number;
+  has_disclosures: boolean;
+  validation_summary: {
+    valid: boolean;
+    total_errors: number;
+    error_summary: Record<string, number>;
+  };
+  rows: StagedRowPreview[];
+  created_at: string;
+  expires_at: string;
+}
+
+export interface KnowledgeBaseActivation {
+  version_id: string;
+  version_num: number;
+  organization_id: string;
+  manifest_sha256: string;
+  activated_at: string;
+  activated_by: string;
+  activation_reason?: string;
+  counts: {
+    colors: number;
+    products: number;
+    claims: number;
+    required_disclosures: number;
+    assets: number;
+  };
+}
+
+export interface OrganizationInvitation {
+  id: string;
+  organization_id: string;
+  email: string;
+  role: UserRole;
+  status: 'pending' | 'accepted' | 'expired' | 'revoked';
+  delivery_status: 'sent' | 'unconfigured_demo_fallback' | 'failed';
+  invited_by?: string;
+  inviter_email_snapshot: string;
+  expires_at: string;
+  created_at: string;
+  consumed_at?: string;
+  invitation_link?: string;
+}
+
+export interface InvitationVerifyData {
+  organization_id: string;
+  organization_name: string;
+  organization_slug: string;
+  email: string;
+  role: UserRole;
+  expires_at: string;
+  is_existing_user: boolean;
+}

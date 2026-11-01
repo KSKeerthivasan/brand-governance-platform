@@ -2,31 +2,46 @@ import os
 import json
 import time
 import logging
+import uuid
+import hashlib
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
+from pydantic import BaseModel
+
 logger = logging.getLogger(__name__)
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status, Response
 from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.organization import OrganizationMembership, User
-from app.models.knowledge import KnowledgeSource, KnowledgeRule, KnowledgeFact, BrandAsset
-from app.models.brand import Brand
+from app.models.knowledge import (
+    KnowledgeSource, KnowledgeRule, KnowledgeFact, BrandAsset,
+    KnowledgeBaseVersion, OrganizationActiveKnowledgeBase,
+    StagedImport, StagedImportProductRow, StagedImportClaimRow, StagedImportDisclosureRow
+)
+from app.models.product import Product
+from app.models.claim import Claim, RequiredDisclosure
+from app.models.brand import Brand, BrandProfile, BrandColor
 from app.schemas.knowledge import (
     KnowledgeSourceOut,
     KnowledgeRuleOut, KnowledgeRuleCreate, KnowledgeRuleReview, KnowledgeRuleUpdate,
     KnowledgeFactOut, KnowledgeFactCreate, KnowledgeFactReview, KnowledgeFactUpdate,
-    BrandAssetOut, BrandAssetReview
+    BrandAssetOut, BrandAssetReview,
+    BrandColorIn, BrandColorOut, BrandProfileIn, BrandProfileOut,
+    StagedImportPreviewOut, StagedRowPreview, KnowledgeBaseActivationIn, KnowledgeBaseActivationOut,
+    LiveCheckRequest, LiveInfraction, LiveCheckResponse
 )
+from app.services.excel_service import excel_service
+from app.services.rescore_service import rescore_service
 from app.services.storage import storage_service
 from app.services.extraction import extract_pdf_text_and_candidates, extract_image_metadata
 from app.services.evidence_validator import extract_pdf_pages
 from app.services.gemini_extractor import GeminiConfigurationError, GeminiExtractionError
 from app.services.audit import log_audit_event
 from app.services.auth import decode_access_token
-from app.api.deps import get_current_user, require_any_member, require_knowledge_reviewer, security
+from app.api.deps import get_current_user, require_any_member, require_knowledge_reviewer, require_content_creator, security
 
 CATEGORY_TITLE_MAP = {
     "pdf_brand_guidelines": "PDF Brand Guidelines",
@@ -53,7 +68,7 @@ async def upload_knowledge_document(
     CRITICAL REQUIREMENT: Newly uploaded document and extracted records start in PENDING_REVIEW state.
     """
     org_id = membership.organization_id
-    
+
     # Save file securely
     file_path, file_size = await storage_service.save_file(file, org_id, subfolder="knowledge")
     safe_filename = os.path.basename(file.filename or "uploaded_doc")
@@ -259,7 +274,7 @@ def list_knowledge_sources(
         r_cnt = db.query(KnowledgeRule).filter(KnowledgeRule.source_id == s.id).count()
         f_cnt = db.query(KnowledgeFact).filter(KnowledgeFact.source_id == s.id).count()
         a_cnt = db.query(BrandAsset).filter(BrandAsset.source_id == s.id).count()
-        
+
         out = KnowledgeSourceOut.model_validate(s)
         out.rules_count = r_cnt
         out.facts_count = f_cnt
@@ -966,3 +981,833 @@ def get_brand_asset_file(
     media_type = asset.mime_type or "image/png"
     return FileResponse(local_asset_path, media_type=media_type)
 
+
+# -----------------------------------------------------------------------------
+# ROUND 3: STRUCTURED KNOWLEDGE & STAGED EXCEL INGESTION ENDPOINTS
+# -----------------------------------------------------------------------------
+
+@router.get("/templates/{template_type}")
+def download_excel_template(
+    template_type: str
+):
+    """
+    Downloads authoritative Excel template (.xlsx) for bulk ingestion.
+    Supported types: 'product_catalogue', 'claims_and_disclosures'.
+    Contains standard blank schemas; accessible without auth blocking.
+    """
+    if template_type not in ("product_catalogue", "claims_and_disclosures"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported template type '{template_type}'. Permitted: 'product_catalogue', 'claims_and_disclosures'"
+        )
+
+    content = excel_service.generate_template(template_type)
+    filename = f"{template_type}.xlsx"
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Access-Control-Expose-Headers": "Content-Disposition"
+        }
+    )
+
+
+@router.post("/import/{import_type}/preview", response_model=StagedImportPreviewOut)
+async def preview_staged_excel_import(
+    import_type: str,
+    file: UploadFile = File(...),
+    idempotency_key: Optional[str] = Form(None),
+    membership: OrganizationMembership = Depends(require_knowledge_reviewer),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Uploads and validates an Excel workbook, staging rows into staging tables.
+    CRITICAL: Does NOT mutate active Product, Claim, or Disclosure records!
+    Returns full row-by-row preview with validation errors.
+    """
+    if import_type not in ("product_catalogue", "claims_and_disclosures"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported import type '{import_type}'. Permitted: 'product_catalogue', 'claims_and_disclosures'"
+        )
+
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty.")
+
+    effective_idempotency_key = idempotency_key or hashlib.sha256(file_bytes).hexdigest()[:32]
+    org_id = membership.organization_id
+
+    staged_import = excel_service.parse_and_stage_excel(
+        db=db,
+        org_id=org_id,
+        user_id=current_user.id,
+        file_name=file.filename or "import.xlsx",
+        file_bytes=file_bytes,
+        idempotency_key=effective_idempotency_key,
+        import_type=import_type
+    )
+
+    # Collect row previews
+    preview_rows: List[StagedRowPreview] = []
+    if import_type == "product_catalogue":
+        p_rows = db.query(StagedImportProductRow).filter(
+            StagedImportProductRow.organization_id == org_id,
+            StagedImportProductRow.import_id == staged_import.id
+        ).order_by(StagedImportProductRow.row_number).all()
+        for r in p_rows:
+            preview_rows.append(StagedRowPreview(
+                row_number=r.row_number,
+                raw_data=r.raw_data or {},
+                parsed_data=r.parsed_data,
+                validation_errors=r.validation_errors or [],
+                is_valid=r.is_valid
+            ))
+    elif import_type == "claims_and_disclosures":
+        c_rows = db.query(StagedImportClaimRow).filter(
+            StagedImportClaimRow.organization_id == org_id,
+            StagedImportClaimRow.import_id == staged_import.id
+        ).order_by(StagedImportClaimRow.row_number).all()
+        for r in c_rows:
+            preview_rows.append(StagedRowPreview(
+                row_number=r.row_number,
+                raw_data=r.raw_data or {},
+                parsed_data=r.parsed_data,
+                validation_errors=r.validation_errors or [],
+                is_valid=r.is_valid
+            ))
+        d_rows = db.query(StagedImportDisclosureRow).filter(
+            StagedImportDisclosureRow.organization_id == org_id,
+            StagedImportDisclosureRow.import_id == staged_import.id
+        ).order_by(StagedImportDisclosureRow.row_number).all()
+        for r in d_rows:
+            preview_rows.append(StagedRowPreview(
+                row_number=r.row_number,
+                raw_data=r.raw_data or {},
+                parsed_data=r.parsed_data,
+                validation_errors=r.validation_errors or [],
+                is_valid=r.is_valid
+            ))
+
+    out = StagedImportPreviewOut.model_validate(staged_import)
+    out.rows = preview_rows
+    return out
+
+
+@router.get("/import/{import_id}/preview", response_model=StagedImportPreviewOut)
+def get_staged_import_preview(
+    import_id: str,
+    membership: OrganizationMembership = Depends(require_any_member),
+    db: Session = Depends(get_db)
+):
+    """
+    Retrieves existing staged import preview and row validation details.
+    """
+    org_id = membership.organization_id
+    staged_import = db.query(StagedImport).filter(
+        StagedImport.organization_id == org_id,
+        StagedImport.id == import_id
+    ).first()
+
+    if not staged_import:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staged import session not found.")
+
+    preview_rows: List[StagedRowPreview] = []
+    if staged_import.import_type == "product_catalogue":
+        p_rows = db.query(StagedImportProductRow).filter(
+            StagedImportProductRow.organization_id == org_id,
+            StagedImportProductRow.import_id == staged_import.id
+        ).order_by(StagedImportProductRow.row_number).all()
+        for r in p_rows:
+            preview_rows.append(StagedRowPreview(
+                row_number=r.row_number,
+                raw_data=r.raw_data or {},
+                parsed_data=r.parsed_data,
+                validation_errors=r.validation_errors or [],
+                is_valid=r.is_valid
+            ))
+    elif staged_import.import_type == "claims_and_disclosures":
+        c_rows = db.query(StagedImportClaimRow).filter(
+            StagedImportClaimRow.organization_id == org_id,
+            StagedImportClaimRow.import_id == staged_import.id
+        ).order_by(StagedImportClaimRow.row_number).all()
+        for r in c_rows:
+            preview_rows.append(StagedRowPreview(
+                row_number=r.row_number,
+                raw_data=r.raw_data or {},
+                parsed_data=r.parsed_data,
+                validation_errors=r.validation_errors or [],
+                is_valid=r.is_valid
+            ))
+        d_rows = db.query(StagedImportDisclosureRow).filter(
+            StagedImportDisclosureRow.organization_id == org_id,
+            StagedImportDisclosureRow.import_id == staged_import.id
+        ).order_by(StagedImportDisclosureRow.row_number).all()
+        for r in d_rows:
+            preview_rows.append(StagedRowPreview(
+                row_number=r.row_number,
+                raw_data=r.raw_data or {},
+                parsed_data=r.parsed_data,
+                validation_errors=r.validation_errors or [],
+                is_valid=r.is_valid
+            ))
+
+    out = StagedImportPreviewOut.model_validate(staged_import)
+    out.rows = preview_rows
+    return out
+
+
+@router.post("/import/{import_id}/confirm")
+def confirm_staged_import(
+    import_id: str,
+    membership: OrganizationMembership = Depends(require_knowledge_reviewer),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Atomically commits a validated staged import into active product/claim tables.
+    If validation errors exist or any row fails, the transaction is completely rolled back.
+    """
+    try:
+        result = excel_service.confirm_staged_import(
+            db=db,
+            org_id=membership.organization_id,
+            import_id=import_id,
+            user_id=current_user.id
+        )
+    except ValueError as ve:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
+    except RuntimeError as re_err:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(re_err))
+
+    log_audit_event(
+        db=db,
+        organization_id=membership.organization_id,
+        user_id=current_user.id,
+        event_type="EXCEL_IMPORT_CONFIRMED",
+        entity_type="staged_import",
+        entity_id=import_id,
+        summary=f"Confirmed staged Excel import {import_id} ({result.get('import_type')})",
+        details=result
+    )
+
+    return result
+
+
+@router.post("/import/{import_id}/discard")
+def discard_staged_import(
+    import_id: str,
+    membership: OrganizationMembership = Depends(require_knowledge_reviewer),
+    db: Session = Depends(get_db)
+):
+    """
+    Discards a staged import session without modifying any active records.
+    """
+    excel_service.discard_staged_import(db, membership.organization_id, import_id)
+    return {"status": "discarded", "import_id": import_id}
+
+
+@router.get("/brand-profile", response_model=BrandProfileOut)
+def get_brand_profile(
+    membership: OrganizationMembership = Depends(require_any_member),
+    db: Session = Depends(get_db)
+):
+    """
+    Retrieves the structured Brand Profile and associated Brand Colors for the organization.
+    """
+    org_id = membership.organization_id
+    profile = db.query(BrandProfile).filter(BrandProfile.organization_id == org_id).first()
+    if not profile:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Brand profile not found for this organization. Please create one."
+        )
+
+    colors = db.query(BrandColor).filter(BrandColor.brand_profile_id == profile.id).all()
+    out = BrandProfileOut.model_validate(profile)
+    out.colors = [BrandColorOut.model_validate(c) for c in colors]
+    return out
+
+
+@router.post("/brand-profile", response_model=BrandProfileOut)
+def save_brand_profile(
+    req: BrandProfileIn,
+    membership: OrganizationMembership = Depends(require_knowledge_reviewer),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Saves or updates the structured Brand Profile and atomic Brand Colors.
+    Ensures minimum required fields (Section 2.7 of specification) are enforced.
+    """
+    org_id = membership.organization_id
+
+    # Resolve Brand record
+    brand = db.query(Brand).filter(Brand.organization_id == org_id).first()
+    if not brand:
+        brand = Brand(
+            organization_id=org_id,
+            name=req.brand_name.strip(),
+            description=req.brand_description.strip()
+        )
+        db.add(brand)
+        db.flush()
+
+    profile = db.query(BrandProfile).filter(BrandProfile.organization_id == org_id).first()
+    if not profile:
+        profile = BrandProfile(
+            organization_id=org_id,
+            brand_name=req.brand_name,
+            brand_description=req.brand_description,
+            approved_taglines=req.approved_taglines,
+            brand_personality=req.brand_personality,
+            preferred_tone=req.preferred_tone,
+            tones_to_avoid=req.tones_to_avoid,
+            preferred_terminology=req.preferred_terminology,
+            prohibited_terminology=req.prohibited_terminology,
+            writing_style=req.writing_style,
+            approved_languages=req.approved_languages,
+            primary_heading_font=req.primary_heading_font,
+            secondary_body_font=req.secondary_body_font,
+            additional_approved_fonts=req.additional_approved_fonts,
+            typography_instructions=req.typography_instructions,
+            visual_style=req.visual_style,
+            preferred_imagery_style=req.preferred_imagery_style,
+            preferred_backgrounds=req.preferred_backgrounds,
+            visual_styles_to_avoid=req.visual_styles_to_avoid,
+            logo_usage_instructions=req.logo_usage_instructions
+        )
+        db.add(profile)
+        db.flush()
+    else:
+        profile.brand_name = req.brand_name
+        profile.brand_description = req.brand_description
+        profile.approved_taglines = req.approved_taglines
+        profile.brand_personality = req.brand_personality
+        profile.preferred_tone = req.preferred_tone
+        profile.tones_to_avoid = req.tones_to_avoid
+        profile.preferred_terminology = req.preferred_terminology
+        profile.prohibited_terminology = req.prohibited_terminology
+        profile.writing_style = req.writing_style
+        profile.approved_languages = req.approved_languages
+        profile.primary_heading_font = req.primary_heading_font
+        profile.secondary_body_font = req.secondary_body_font
+        profile.additional_approved_fonts = req.additional_approved_fonts
+        profile.typography_instructions = req.typography_instructions
+        profile.visual_style = req.visual_style
+        profile.preferred_imagery_style = req.preferred_imagery_style
+        profile.preferred_backgrounds = req.preferred_backgrounds
+        profile.visual_styles_to_avoid = req.visual_styles_to_avoid
+        profile.logo_usage_instructions = req.logo_usage_instructions
+        profile.updated_at = datetime.utcnow()
+
+    # Atomically replace brand colors
+    db.query(BrandColor).filter(BrandColor.brand_profile_id == profile.id).delete()
+    new_colors = []
+    for c in req.colors:
+        color_obj = BrandColor(
+            organization_id=org_id,
+            brand_profile_id=profile.id,
+            colour_name=c.colour_name,
+            colour_family=c.colour_family,
+            colour_role=c.colour_role,
+            hex_value=c.hex_value,
+            rgb_r=c.rgb_r,
+            rgb_g=c.rgb_g,
+            rgb_b=c.rgb_b
+        )
+        db.add(color_obj)
+        new_colors.append(color_obj)
+
+    db.commit()
+    db.refresh(profile)
+
+    log_audit_event(
+        db=db,
+        organization_id=org_id,
+        user_id=current_user.id,
+        event_type="BRAND_PROFILE_SAVED",
+        entity_type="brand_profile",
+        entity_id=profile.id,
+        summary=f"Saved structured Brand Profile for '{profile.brand_name}' with {len(new_colors)} colors",
+        details={"colors_count": len(new_colors), "fonts": [profile.primary_heading_font, profile.secondary_body_font]}
+    )
+
+    out = BrandProfileOut.model_validate(profile)
+    out.colors = [BrandColorOut.model_validate(c) for c in new_colors]
+    return out
+
+
+@router.post("/activate", response_model=KnowledgeBaseActivationOut)
+def activate_knowledge_base(
+    payload: Optional[KnowledgeBaseActivationIn] = None,
+    membership: OrganizationMembership = Depends(require_knowledge_reviewer),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Assembles complete immutable Knowledge Base Manifest (Brand Profile, Colors, Products,
+    Claims, Disclosures, Assets) and activates it with SHA-256 integrity hash.
+    Protected at the database level against mutation or deletion.
+    """
+    org_id = membership.organization_id
+
+    # Validate BrandProfile exists
+    brand_profile = db.query(BrandProfile).filter(BrandProfile.organization_id == org_id).first()
+    if not brand_profile:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot activate knowledge base: Brand Profile must be created and saved first."
+        )
+
+    colors = db.query(BrandColor).filter(BrandColor.organization_id == org_id).all()
+    products = db.query(Product).filter(Product.organization_id == org_id).all()
+    claims = db.query(Claim).filter(Claim.organization_id == org_id).all()
+    disclosures = db.query(RequiredDisclosure).filter(RequiredDisclosure.organization_id == org_id).all()
+    assets = db.query(BrandAsset).filter(
+        BrandAsset.organization_id == org_id,
+        BrandAsset.status == "approved"
+    ).all()
+
+    # Determine next version number
+    latest_ver = db.query(KnowledgeBaseVersion).filter(
+        KnowledgeBaseVersion.organization_id == org_id
+    ).order_by(KnowledgeBaseVersion.version_num.desc()).first()
+
+    next_version = (latest_ver.version_num + 1) if latest_ver else 1
+
+    colors_snapshot = [
+        {"name": c.colour_name, "family": c.colour_family, "role": c.colour_role, "hex": c.hex_value, "rgb": [c.rgb_r, c.rgb_g, c.rgb_b]}
+        for c in colors
+    ]
+    products_snapshot = [
+        {
+            "product_id": p.product_id,
+            "name": p.product_name,
+            "category": p.product_category,
+            "offering_type": p.offering_type,
+            "variant_name": p.variant_name,
+            "sku": p.sku,
+            "pack_size": float(p.pack_size) if p.pack_size is not None else None,
+            "pack_unit": p.pack_unit,
+            "ingredients": p.ingredients_components,
+            "market": p.applicable_market,
+            "status": p.record_status
+        }
+        for p in products
+    ]
+    claims_snapshot = [
+        {
+            "claim_id": c.claim_id,
+            "applicable_product_id": c.applicable_product_id,
+            "claim_text": c.claim_text,
+            "status": c.claim_status,
+            "type": c.claim_type,
+            "restricted_conditions": c.restricted_conditions,
+            "prohibited_variations": c.prohibited_variations,
+            "approved_variations": c.approved_variations,
+            "market": c.applicable_market
+        }
+        for c in claims
+    ]
+    disclosures_snapshot = [
+        {
+            "disclosure_id": d.disclosure_id,
+            "applicable_product_id": d.applicable_product_id,
+            "text": d.disclosure_text,
+            "applies_when": d.applies_when,
+            "applicable_market": d.applicable_market,
+            "effective_from": str(d.effective_from) if d.effective_from else None,
+            "effective_until": str(d.effective_until) if d.effective_until else None
+        }
+        for d in disclosures
+    ]
+    assets_snapshot = [
+        {
+            "asset_id": a.id,
+            "asset_name": a.asset_name,
+            "asset_type": a.asset_type,
+            "file_path": a.file_path,
+            "status": a.status
+        }
+        for a in assets
+    ]
+
+    manifest_dict = {
+        "version_num": next_version,
+        "organization_id": org_id,
+        "brand_profile": {
+            "brand_name": brand_profile.brand_name,
+            "description": brand_profile.brand_description,
+            "personality": brand_profile.brand_personality or [],
+            "preferred_tone": brand_profile.preferred_tone or [],
+            "tones_to_avoid": brand_profile.tones_to_avoid or [],
+            "preferred_terminology": brand_profile.preferred_terminology or [],
+            "prohibited_terminology": brand_profile.prohibited_terminology or [],
+            "writing_style": brand_profile.writing_style,
+            "approved_languages": brand_profile.approved_languages or [],
+            "heading_font": brand_profile.primary_heading_font,
+            "body_font": brand_profile.secondary_body_font,
+            "additional_fonts": brand_profile.additional_approved_fonts or [],
+            "visual_style": brand_profile.visual_style or [],
+            "imagery_style": brand_profile.preferred_imagery_style or [],
+            "backgrounds": brand_profile.preferred_backgrounds or [],
+            "visual_styles_to_avoid": brand_profile.visual_styles_to_avoid or [],
+            "logo_instructions": brand_profile.logo_usage_instructions,
+        },
+        "brand_colors": colors_snapshot,
+        "products": products_snapshot,
+        "claims": claims_snapshot,
+        "required_disclosures": disclosures_snapshot,
+        "brand_assets": assets_snapshot,
+        "activated_at": datetime.utcnow().isoformat(),
+        "activated_by": current_user.id
+    }
+
+    manifest_json = json.dumps(manifest_dict, sort_keys=True, default=str)
+    manifest_sha256 = hashlib.sha256(manifest_json.encode("utf-8")).hexdigest()
+
+    reason = payload.activation_reason if (payload and payload.activation_reason) else f"Activated knowledge base v{next_version}"
+
+    # 1. Create Immutable KnowledgeBaseVersion
+    kb_ver = KnowledgeBaseVersion(
+        organization_id=org_id,
+        version_num=next_version,
+        manifest_sha256=manifest_sha256,
+        manifest_data=manifest_dict,
+        activated_by=current_user.id,
+        activation_reason=reason
+    )
+    db.add(kb_ver)
+    db.flush()
+
+    # 2. Update Active Pointer
+    active_kb = db.query(OrganizationActiveKnowledgeBase).filter(
+        OrganizationActiveKnowledgeBase.organization_id == org_id
+    ).first()
+
+    if not active_kb:
+        active_kb = OrganizationActiveKnowledgeBase(
+            organization_id=org_id,
+            active_version_id=kb_ver.id,
+            activated_by=current_user.id,
+            activated_at=datetime.utcnow()
+        )
+        db.add(active_kb)
+    else:
+        active_kb.active_version_id = kb_ver.id
+        active_kb.activated_by = current_user.id
+        active_kb.activated_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(kb_ver)
+
+    log_audit_event(
+        db=db,
+        organization_id=org_id,
+        user_id=current_user.id,
+        event_type="KNOWLEDGE_BASE_ACTIVATED",
+        entity_type="knowledge_base_version",
+        entity_id=kb_ver.id,
+        summary=f"Activated Knowledge Base Version {kb_ver.version_num} (SHA-256: {manifest_sha256[:16]}...)",
+        details={
+            "version_num": kb_ver.version_num,
+            "manifest_sha256": manifest_sha256,
+            "reason": reason,
+            "products_count": len(products),
+            "claims_count": len(claims),
+            "disclosures_count": len(disclosures)
+        }
+    )
+
+    # 3. Trigger Bounded Synchronous Impact Re-Scoring over active drafts
+    try:
+        rescore_job = rescore_service.trigger_rescore_for_activation(
+            db=db,
+            org_id=org_id,
+            kb_version=kb_ver,
+            user_id=current_user.id
+        )
+    except Exception as rescore_err:
+        logger.error(f"Synchronous rescoring encountered an unexpected error: {rescore_err}")
+        rescore_job = None
+
+    return KnowledgeBaseActivationOut(
+        version_id=kb_ver.id,
+        version_num=kb_ver.version_num,
+        manifest_sha256=manifest_sha256,
+        activation_reason=reason,
+        activated_at=kb_ver.activated_at,
+        activated_by=current_user.id,
+        counts={
+            "colors": len(colors),
+            "products": len(products),
+            "claims": len(claims),
+            "required_disclosures": len(disclosures),
+            "assets": len(assets)
+        },
+        rescore_job_id=rescore_job.id if rescore_job else None,
+        rescore_summary={
+            "total_items": rescore_job.total_items if rescore_job else 0,
+            "completed_items": rescore_job.completed_items if rescore_job else 0,
+            "status": rescore_job.status if rescore_job else "none"
+        } if rescore_job else None
+    )
+
+
+# -----------------------------------------------------------------------------
+# PRODUCTS, CLAIMS, DISCLOSURES & RESCORE QUERY ENDPOINTS
+# -----------------------------------------------------------------------------
+
+@router.get("/products")
+def get_products(
+    membership: OrganizationMembership = Depends(require_content_creator),
+    db: Session = Depends(get_db)
+):
+    """Returns all active catalogue products for the user's organization."""
+    return db.query(Product).filter(
+        Product.organization_id == membership.organization_id
+    ).order_by(Product.product_name.asc()).all()
+
+
+@router.get("/claims")
+def get_claims(
+    membership: OrganizationMembership = Depends(require_knowledge_reviewer),
+    db: Session = Depends(get_db)
+):
+    """Returns all claims for the user's organization."""
+    return db.query(Claim).filter(
+        Claim.organization_id == membership.organization_id
+    ).order_by(Claim.claim_id.asc()).all()
+
+
+@router.get("/disclosures")
+def get_disclosures(
+    membership: OrganizationMembership = Depends(require_knowledge_reviewer),
+    db: Session = Depends(get_db)
+):
+    """Returns all required disclosures for the user's organization."""
+    return db.query(RequiredDisclosure).filter(
+        RequiredDisclosure.organization_id == membership.organization_id
+    ).order_by(RequiredDisclosure.disclosure_id.asc()).all()
+
+
+@router.get("/rescore-jobs")
+def list_rescore_jobs(
+    membership: OrganizationMembership = Depends(require_knowledge_reviewer),
+    db: Session = Depends(get_db)
+):
+    """Returns recent guideline update impact re-scoring jobs."""
+    return rescore_service.list_jobs(db, membership.organization_id)
+
+
+@router.get("/rescore-jobs/{job_id}")
+def get_rescore_job_detail(
+    job_id: str,
+    membership: OrganizationMembership = Depends(require_knowledge_reviewer),
+    db: Session = Depends(get_db)
+):
+    """Returns detailed item-level impact re-scoring summary."""
+    summary = rescore_service.get_job_summary(db, membership.organization_id, job_id)
+    if not summary:
+        raise HTTPException(status_code=404, detail="Rescore job not found")
+    return summary
+
+
+@router.post("/live-check", response_model=LiveCheckResponse)
+def live_check_content(
+    req: LiveCheckRequest,
+    membership: OrganizationMembership = Depends(require_content_creator),
+    db: Session = Depends(get_db)
+):
+    """
+    Round 2 Commitment 1 / Round 3 P0-3: Debounced In-Editor Real-Time Assistant.
+    Evaluates in-progress copy against approved rules and claims without creating a version or run.
+    Returns inline infractions with actionable one-click auto-fix proposals.
+    """
+    org_id = membership.organization_id
+    text = (req.body_text or "").strip()
+    if not text:
+        return LiveCheckResponse(status="clean", infractions=[], total_infractions=0)
+
+    # 1. Fetch active approved rules
+    rules = db.query(KnowledgeRule).filter(
+        KnowledgeRule.organization_id == org_id,
+        KnowledgeRule.status == "approved"
+    ).all()
+
+    # 2. Fetch active brand profile
+    profile = db.query(BrandProfile).filter(BrandProfile.organization_id == org_id).first()
+    brand_name = profile.brand_name if profile else "Brand"
+
+    # 3. Fetch active claims & disclosures
+    claims = db.query(Claim).filter(Claim.organization_id == org_id).all()
+    disclosures = db.query(RequiredDisclosure).filter(RequiredDisclosure.organization_id == org_id).all()
+
+    infractions: List[LiveInfraction] = []
+
+    # Check Rules
+    for rule in rules:
+        if not rule.pattern:
+            continue
+        patterns = [p.strip() for p in rule.pattern.replace("|", ",").split(",") if p.strip()]
+        for pat in patterns:
+            idx = text.lower().find(pat.lower())
+            if idx != -1:
+                matched_span = text[idx : idx + len(pat)]
+                replacement = None
+                can_fix = False
+                if rule.recommended_alternatives:
+                    replacement = rule.recommended_alternatives.split(",")[0].strip()
+                    can_fix = True
+                elif "Freshsip Pvt" in pat or "Pvt. Ltd." in pat:
+                    replacement = brand_name
+                    can_fix = True
+
+                infractions.append(LiveInfraction(
+                    id=str(uuid.uuid4()),
+                    rule_code=rule.rule_code,
+                    category=rule.rule_type or "rule_violation",
+                    severity=rule.severity,
+                    title=rule.title,
+                    explanation=rule.explanation or f"Matches prohibited term '{pat}'",
+                    matched_text=matched_span,
+                    replacement_text=replacement,
+                    can_autofix=can_fix
+                ))
+                break
+
+    # Check Claims Prohibited Variations
+    for clm in claims:
+        if clm.claim_status == "Prohibited":
+            if clm.claim_text and clm.claim_text.lower() in text.lower():
+                infractions.append(LiveInfraction(
+                    id=str(uuid.uuid4()),
+                    rule_code=clm.claim_id,
+                    category="prohibited_claim",
+                    severity="error",
+                    title=f"Prohibited Claim Detected ({clm.claim_id})",
+                    explanation=f"Claim '{clm.claim_text}' is prohibited under active governance guidelines.",
+                    matched_text=clm.claim_text,
+                    replacement_text=None,
+                    can_autofix=False
+                ))
+        if clm.prohibited_variations:
+            for pvar in clm.prohibited_variations.split(","):
+                pvar = pvar.strip()
+                if pvar and pvar.lower() in text.lower():
+                    infractions.append(LiveInfraction(
+                        id=str(uuid.uuid4()),
+                        rule_code=clm.claim_id,
+                        category="unsubstantiated_claim",
+                        severity="error",
+                        title=f"Disallowed Claim Variation ({clm.claim_id})",
+                        explanation=f"Phrasing '{pvar}' is explicitly disallowed.",
+                        matched_text=pvar,
+                        replacement_text=clm.approved_variations.split(",")[0].strip() if clm.approved_variations else None,
+                        can_autofix=bool(clm.approved_variations)
+                    ))
+                    break
+
+    # Check Required Disclosures for selected product or ALL
+    prod_code = None
+    if req.product_id:
+        selected_prod = db.query(Product).filter(
+            Product.organization_id == org_id,
+            Product.id == req.product_id
+        ).first()
+        if selected_prod:
+            prod_code = selected_prod.product_id
+
+    for disc in disclosures:
+        if disc.applicable_product_id in ("ALL", prod_code):
+            if disc.disclosure_text and disc.disclosure_text.lower() not in text.lower():
+                infractions.append(LiveInfraction(
+                    id=str(uuid.uuid4()),
+                    rule_code=disc.disclosure_id,
+                    category="missing_mandatory_disclosure",
+                    severity="warning",
+                    title=f"Missing Disclosure: {disc.disclosure_id}",
+                    explanation=f"Required disclosure for {disc.applicable_product_id}: '{disc.disclosure_text}'",
+                    matched_text=None,
+                    replacement_text=f"{text}\n\n{disc.disclosure_text}" if text else disc.disclosure_text,
+                    can_autofix=True
+                ))
+
+    return LiveCheckResponse(
+        status="violations_detected" if infractions else "clean",
+        infractions=infractions,
+        total_infractions=len(infractions)
+    )
+
+
+class RescoreTriggerRequest(BaseModel):
+    knowledge_base_version_id: Optional[str] = None
+    scope: Optional[str] = "all"
+    channel: Optional[str] = None
+
+
+@router.post("/rescore-trigger")
+def trigger_rescore_job(
+    req: RescoreTriggerRequest,
+    membership: OrganizationMembership = Depends(require_knowledge_reviewer),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Round 2 Commitment 3 / Round 3 P0-2: Trigger Guideline Impact Rescoring Hub Simulation.
+    Evaluates historical content items against the specified (or active) Knowledge Base Version
+    in shadow mode with immutable audit trail.
+    """
+    org_id = membership.organization_id
+    kb_ver = None
+    if req.knowledge_base_version_id:
+        kb_ver = db.query(KnowledgeBaseVersion).filter(
+            KnowledgeBaseVersion.id == req.knowledge_base_version_id,
+            KnowledgeBaseVersion.organization_id == org_id
+        ).first()
+    if not kb_ver:
+        active = db.query(OrganizationActiveKnowledgeBase).filter(
+            OrganizationActiveKnowledgeBase.organization_id == org_id
+        ).first()
+        if active and active.active_version_id:
+            kb_ver = db.query(KnowledgeBaseVersion).filter(
+                KnowledgeBaseVersion.id == active.active_version_id
+            ).first()
+
+    if not kb_ver:
+        kb_ver = db.query(KnowledgeBaseVersion).filter(
+            KnowledgeBaseVersion.organization_id == org_id
+        ).order_by(KnowledgeBaseVersion.version_num.desc()).first()
+
+    if not kb_ver:
+        raise HTTPException(status_code=400, detail="No active or historical knowledge base version found to rescore against.")
+
+    job = rescore_service.trigger_rescore_for_activation(
+        db=db,
+        org_id=org_id,
+        kb_version=kb_ver,
+        user_id=current_user.id
+    )
+
+    return {
+        "status": "success",
+        "job_id": job.id,
+        "version_num": kb_ver.version_num,
+        "total_items": job.total_items,
+        "completed_items": job.completed_items,
+        "job_status": job.status
+    }
+
+
+@router.get("/versions")
+def get_kb_versions(
+    membership: OrganizationMembership = Depends(require_knowledge_reviewer),
+    db: Session = Depends(get_db)
+):
+    """Returns all immutable knowledge base versions and manifests for the organization."""
+    return db.query(KnowledgeBaseVersion).filter(
+        KnowledgeBaseVersion.organization_id == membership.organization_id
+    ).order_by(KnowledgeBaseVersion.version_num.desc()).all()

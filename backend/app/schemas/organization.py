@@ -64,3 +64,50 @@ class BrandOut(BrandBase):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class InvitationCreate(BaseModel):
+    email: EmailStr = Field(..., description="Corporate or member email address")
+    role: str = Field(..., description="Assigned role: org_admin, knowledge_reviewer, content_creator, approval_manager")
+    invitee_name: Optional[str] = Field(None, max_length=255, description="Display name of invitee")
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, v: str) -> str:
+        permitted = {"org_admin", "knowledge_reviewer", "content_creator", "approval_manager"}
+        if v not in permitted:
+            raise ValueError(f"Invalid role '{v}'. Permitted: {', '.join(permitted)}")
+        return v
+
+
+class InvitationOut(BaseModel):
+    id: str
+    organization_id: str
+    email: str
+    role: str
+    status: str
+    delivery_status: str
+    invited_by: Optional[str] = None
+    inviter_email_snapshot: str
+    expires_at: datetime
+    created_at: datetime
+    consumed_at: Optional[datetime] = None
+    invitation_link: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class InvitationVerifyOut(BaseModel):
+    organization_id: str
+    organization_name: str
+    organization_slug: str
+    email: str
+    role: str
+    expires_at: datetime
+    is_existing_user: bool
+
+
+class InvitationAcceptIn(BaseModel):
+    token: str = Field(..., min_length=16, description="Invitation secret token")
+    full_name: Optional[str] = Field(None, min_length=2, max_length=255, description="Full name if creating new account")
+    password: Optional[str] = Field(None, min_length=8, max_length=128, description="Password for account authentication")

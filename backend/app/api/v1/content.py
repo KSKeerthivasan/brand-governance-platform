@@ -234,6 +234,7 @@ def create_content_item(
     content_item = ContentItem(
         organization_id=org_id,
         brand_id=req.brand_id,
+        product_id=req.product_id,
         created_by=current_user.id,
         title=req.title,
         channel=req.channel,
@@ -366,6 +367,8 @@ def update_content_item(
         item.title = req.title
     if req.channel:
         item.channel = req.channel
+    if req.product_id is not None:
+        item.product_id = req.product_id
 
     if text_changed or poster_changed or title_changed or channel_changed or item.status in ["submitted", "approved", "changes_requested"]:
         # Create a new version

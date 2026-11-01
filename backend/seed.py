@@ -93,7 +93,8 @@ def check_production_seed_guard():
 def seed_freshsip_data(session=None):
     check_production_seed_guard()
     print("Initializing database tables...")
-    Base.metadata.create_all(bind=engine)
+    target_bind = session.get_bind() if session else engine
+    Base.metadata.create_all(bind=target_bind)
     db = session or SessionLocal()
     close_db = session is None
 
@@ -494,6 +495,16 @@ def seed_freshsip_data(session=None):
                         existing.asset_type = a_type
             db.commit()
             print("Canonical brand assets populated/updated successfully (14 assets).")
+
+        # -------------------------------------------------------------
+        # STEP 3F.2: SEED ROUND 3 STRUCTURED ENTITIES & ACTIVATE V1 KB
+        # -------------------------------------------------------------
+        from scripts.seed_structured_entities import seed_freshsip_structured_entities
+        seed_freshsip_structured_entities(
+            db=db,
+            org=org,
+            user_id=user_map[OrganizationRole.KNOWLEDGE_REVIEWER].id
+        )
 
         # -------------------------------------------------------------
         # STEP 3G: SEED CANONICAL COMPLIANT DEMO DRAFT

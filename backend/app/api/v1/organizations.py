@@ -1,16 +1,20 @@
-from typing import List
+from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models.organization import Organization, OrganizationMembership, User, OrganizationRole
+from app.models.organization import (
+    Organization, OrganizationMembership, User, OrganizationRole, OrganizationInvitation
+)
 from app.models.brand import Brand
 from app.schemas.organization import (
-    OrganizationOut, MembershipOut, MembershipCreate, OrganizationOnboard
+    OrganizationOut, MembershipOut, MembershipCreate, OrganizationOnboard,
+    InvitationCreate, InvitationOut
 )
 from app.schemas.auth import Token, UserOut
 from app.services.auth import get_password_hash, create_access_token
 from app.api.deps import get_current_user, require_org_admin, require_any_member
 from app.services.audit import log_audit_event
+from app.services.invitation_service import invitation_service
 
 router = APIRouter()
 
@@ -283,4 +287,179 @@ def add_org_member(
         user_full_name=user.full_name,
         role=target_membership.role,
         created_at=target_membership.created_at
+    )
+
+
+# -----------------------------------------------------------------------------
+# ROUND 3: TEAM INVITATIONS & DELIVERY FALLBACK ENGINE
+# -----------------------------------------------------------------------------
+
+@router.post("/{org_id}/invitations", response_model=InvitationOut, status_code=status.HTTP_201_CREATED)
+def invite_organization_member(
+    org_id: str,
+    req: InvitationCreate,
+    membership: OrganizationMembership = Depends(require_org_admin),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Invites a new or existing user to the workspace with role-based access.
+    Enforces tenant isolation, token rotation, and zero-billing delivery fallback.
+    """
+    if org_id != membership.organization_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot create invitations for a different organization."
+        )
+
+    try:
+        invitation, raw_token, link = invitation_service.create_invitation(
+            db=db,
+            org_id=org_id,
+            inviter_user=current_user,
+            email=req.email,
+            role=req.role,
+            invitee_name=req.invitee_name
+        )
+    except ValueError as ve:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(ve))
+
+    out = InvitationOut(
+        id=invitation.id,
+        organization_id=invitation.organization_id,
+        email=invitation.email_normalized,
+        role=invitation.role,
+        status=invitation.status,
+        delivery_status=invitation.delivery_status,
+        invited_by=invitation.invited_by,
+        inviter_email_snapshot=invitation.inviter_email_snapshot,
+        expires_at=invitation.expires_at,
+        created_at=invitation.created_at,
+        consumed_at=invitation.consumed_at,
+        invitation_link=link
+    )
+    return out
+
+
+@router.get("/{org_id}/invitations", response_model=List[InvitationOut])
+def list_organization_invitations(
+    org_id: str,
+    membership: OrganizationMembership = Depends(require_org_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Lists all pending, accepted, expired, or revoked invitations for the organization.
+    """
+    if org_id != membership.organization_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot view invitations for a different organization."
+        )
+
+    invitations = db.query(OrganizationInvitation).filter(
+        OrganizationInvitation.organization_id == org_id
+    ).order_by(OrganizationInvitation.created_at.desc()).all()
+
+    return [
+        InvitationOut(
+            id=inv.id,
+            organization_id=inv.organization_id,
+            email=inv.email_normalized,
+            role=inv.role,
+            status=inv.status,
+            delivery_status=inv.delivery_status,
+            invited_by=inv.invited_by,
+            inviter_email_snapshot=inv.inviter_email_snapshot,
+            expires_at=inv.expires_at,
+            created_at=inv.created_at,
+            consumed_at=inv.consumed_at,
+            invitation_link=None
+        )
+        for inv in invitations
+    ]
+
+
+@router.post("/{org_id}/invitations/{invitation_id}/resend", response_model=InvitationOut)
+def resend_organization_invitation(
+    org_id: str,
+    invitation_id: str,
+    membership: OrganizationMembership = Depends(require_org_admin),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Rotates the token, resets expiry to 7 days, and attempts re-delivery.
+    """
+    if org_id != membership.organization_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot resend invitations for a different organization."
+        )
+
+    try:
+        invitation, raw_token, link = invitation_service.resend_invitation(
+            db=db,
+            org_id=org_id,
+            invitation_id=invitation_id,
+            inviter_user=current_user
+        )
+    except ValueError as ve:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
+
+    return InvitationOut(
+        id=invitation.id,
+        organization_id=invitation.organization_id,
+        email=invitation.email_normalized,
+        role=invitation.role,
+        status=invitation.status,
+        delivery_status=invitation.delivery_status,
+        invited_by=invitation.invited_by,
+        inviter_email_snapshot=invitation.inviter_email_snapshot,
+        expires_at=invitation.expires_at,
+        created_at=invitation.created_at,
+        consumed_at=invitation.consumed_at,
+        invitation_link=link
+    )
+
+
+@router.post("/{org_id}/invitations/{invitation_id}/revoke", response_model=InvitationOut)
+def revoke_organization_invitation(
+    org_id: str,
+    invitation_id: str,
+    membership: OrganizationMembership = Depends(require_org_admin),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Revokes an active invitation immediately, preventing future redemption.
+    """
+    if org_id != membership.organization_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot revoke invitations for a different organization."
+        )
+
+    try:
+        invitation = invitation_service.revoke_invitation(
+            db=db,
+            org_id=org_id,
+            invitation_id=invitation_id,
+            user_id=current_user.id
+        )
+    except ValueError as ve:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
+
+    return InvitationOut(
+        id=invitation.id,
+        organization_id=invitation.organization_id,
+        email=invitation.email_normalized,
+        role=invitation.role,
+        status=invitation.status,
+        delivery_status=invitation.delivery_status,
+        invited_by=invitation.invited_by,
+        inviter_email_snapshot=invitation.inviter_email_snapshot,
+        expires_at=invitation.expires_at,
+        created_at=invitation.created_at,
+        consumed_at=invitation.consumed_at,
+        invitation_link=None
     )

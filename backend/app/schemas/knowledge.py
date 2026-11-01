@@ -11,7 +11,7 @@ class KnowledgeRuleBase(BaseModel):
     context_condition: Optional[str] = None
     scope: Optional[str] = "all_channels"
     source_citation: Optional[str] = None
-    
+
     # Extended Stage 2 Metadata
     rule_code: Optional[str] = None
     source_status: Optional[str] = "unknown"  # approved, pending_review, expired, rejected
@@ -164,3 +164,134 @@ class KnowledgeSourceOut(BaseModel):
     assets_count: Optional[int] = 0
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# -------------------------------------------------------------
+# Round 3: Structured Input Schemas
+# -------------------------------------------------------------
+
+class BrandColorIn(BaseModel):
+    colour_name: str
+    colour_family: str
+    colour_role: str
+    hex_value: str
+    rgb_r: int
+    rgb_g: int
+    rgb_b: int
+
+class BrandColorOut(BrandColorIn):
+    id: str
+    organization_id: str
+    brand_profile_id: str
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+class BrandProfileIn(BaseModel):
+    brand_name: str
+    brand_description: str
+    approved_taglines: List[str] = []
+    brand_personality: List[str]
+    preferred_tone: List[str]
+    tones_to_avoid: List[str] = []
+    preferred_terminology: List[str] = []
+    prohibited_terminology: List[str] = []
+    writing_style: str
+    approved_languages: List[str]
+    colors: List[BrandColorIn] = []
+    primary_heading_font: str
+    secondary_body_font: str
+    additional_approved_fonts: List[str] = []
+    typography_instructions: Optional[str] = None
+    visual_style: List[str]
+    preferred_imagery_style: List[str]
+    preferred_backgrounds: List[str] = []
+    visual_styles_to_avoid: List[str] = []
+    logo_usage_instructions: Optional[str] = None
+
+class BrandProfileOut(BaseModel):
+    id: str
+    organization_id: str
+    brand_name: str
+    brand_description: str
+    approved_taglines: List[str] = []
+    brand_personality: List[str] = []
+    preferred_tone: List[str] = []
+    tones_to_avoid: List[str] = []
+    preferred_terminology: List[str] = []
+    prohibited_terminology: List[str] = []
+    writing_style: str
+    approved_languages: List[str] = []
+    colors: List[BrandColorOut] = []
+    primary_heading_font: str
+    secondary_body_font: str
+    additional_approved_fonts: List[str] = []
+    typography_instructions: Optional[str] = None
+    visual_style: List[str] = []
+    preferred_imagery_style: List[str] = []
+    preferred_backgrounds: List[str] = []
+    visual_styles_to_avoid: List[str] = []
+    logo_usage_instructions: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+class StagedRowPreview(BaseModel):
+    row_number: int
+    raw_data: dict
+    parsed_data: Optional[dict] = None
+    validation_errors: List[str] = []
+    is_valid: bool
+
+class StagedImportPreviewOut(BaseModel):
+    id: str
+    organization_id: str
+    import_type: str
+    file_name: str
+    file_sha256: str
+    status: str
+    total_rows: int
+    valid_rows: int
+    error_rows: int
+    has_disclosures: bool
+    validation_summary: dict
+    created_at: datetime
+    expires_at: datetime
+    rows: List[StagedRowPreview] = []
+    model_config = ConfigDict(from_attributes=True)
+
+class KnowledgeBaseActivationIn(BaseModel):
+    activation_reason: Optional[str] = "Knowledge base version activation"
+
+class KnowledgeBaseActivationOut(BaseModel):
+    version_id: str
+    version_num: int
+    manifest_sha256: str
+    activation_reason: str
+    activated_at: datetime
+    activated_by: Optional[str] = None
+    counts: dict
+    rescore_job_id: Optional[str] = None
+    rescore_summary: Optional[dict] = None
+
+class LiveCheckRequest(BaseModel):
+    brand_id: Optional[str] = None
+    product_id: Optional[str] = None
+    channel: str = "Social Media"
+    title: str = ""
+    body_text: str = ""
+
+class LiveInfraction(BaseModel):
+    id: str
+    rule_code: Optional[str] = None
+    category: str
+    severity: str
+    title: str
+    explanation: str
+    matched_text: Optional[str] = None
+    replacement_text: Optional[str] = None
+    can_autofix: bool = False
+
+class LiveCheckResponse(BaseModel):
+    status: str
+    infractions: List[LiveInfraction] = []
+    total_infractions: int = 0

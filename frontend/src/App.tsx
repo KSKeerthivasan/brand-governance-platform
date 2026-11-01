@@ -11,6 +11,7 @@ import { AuditHistory } from './pages/AuditHistory';
 import { TeamManagement } from './pages/TeamManagement';
 import { Login } from './pages/Login';
 import { Onboarding } from './pages/Onboarding';
+import { AcceptInvitation } from './pages/AcceptInvitation';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated, loading } = useAuth();
@@ -34,6 +35,7 @@ export const App: React.FC = () => {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/onboarding" element={<Onboarding />} />
+          <Route path="/accept-invitation" element={<AcceptInvitation />} />
           <Route
             path="/"
             element={

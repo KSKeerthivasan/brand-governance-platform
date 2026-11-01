@@ -21,6 +21,7 @@ class ContentVersionOut(BaseModel):
 
 class ContentItemCreate(BaseModel):
     brand_id: str
+    product_id: Optional[str] = None
     title: str
     channel: str = "Social Media"
     body_text: str
@@ -29,6 +30,7 @@ class ContentItemCreate(BaseModel):
     poster_alt_text: Optional[str] = None
 
 class ContentItemUpdate(BaseModel):
+    product_id: Optional[str] = None
     title: Optional[str] = None
     channel: Optional[str] = None
     body_text: str
@@ -40,6 +42,7 @@ class ContentItemOut(BaseModel):
     id: str
     organization_id: str
     brand_id: str
+    product_id: Optional[str] = None
     created_by: str
     title: str
     channel: str

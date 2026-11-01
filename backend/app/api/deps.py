@@ -50,6 +50,18 @@ def get_current_user(
     return user
 
 
+def get_current_user_optional(
+    auth_credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db)
+) -> Optional[User]:
+    if not auth_credentials:
+        return None
+    try:
+        return get_current_user(auth_credentials=auth_credentials, db=db)
+    except HTTPException:
+        return None
+
+
 class RoleChecker:
     def __init__(self, allowed_roles: List[str]):
         self.allowed_roles = allowed_roles

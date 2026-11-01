@@ -27,7 +27,8 @@ import {
   FileCheck2,
   ArrowRight,
   ShieldCheck,
-  Plus
+  Plus,
+  FileSpreadsheet
 } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../services/api';
@@ -35,20 +36,22 @@ import { useAuth } from '../contexts/AuthContext';
 import { StatusBadge } from '../components/StatusBadge';
 import { KnowledgeRule, KnowledgeFact, KnowledgeSource, BrandAsset, Brand } from '../types';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
+import { ExcelImportModal } from '../components/ExcelImportModal';
+import { BrandProfileModal } from '../components/BrandProfileModal';
 
 export const KnowledgeLibrary: React.FC = () => {
   const { role } = useAuth();
   const [searchParams] = useSearchParams();
   const tabParam = searchParams.get('tab');
-  const initialTab = (tabParam && ['rules', 'facts', 'assets', 'sources'].includes(tabParam))
-    ? (tabParam as 'rules' | 'facts' | 'assets' | 'sources')
+  const initialTab = (tabParam && ['rules', 'facts', 'assets', 'sources', 'rescore'].includes(tabParam))
+    ? (tabParam as 'rules' | 'facts' | 'assets' | 'sources' | 'rescore')
     : 'rules';
 
-  const [activeTab, setActiveTab] = useState<'rules' | 'facts' | 'assets' | 'sources'>(initialTab);
+  const [activeTab, setActiveTab] = useState<'rules' | 'facts' | 'assets' | 'sources' | 'rescore'>(initialTab);
 
   useEffect(() => {
-    if (tabParam && ['rules', 'facts', 'assets', 'sources'].includes(tabParam)) {
-      setActiveTab(tabParam as 'rules' | 'facts' | 'assets' | 'sources');
+    if (tabParam && ['rules', 'facts', 'assets', 'sources', 'rescore'].includes(tabParam)) {
+      setActiveTab(tabParam as 'rules' | 'facts' | 'assets' | 'sources' | 'rescore');
     }
   }, [tabParam]);
 
@@ -57,6 +60,11 @@ export const KnowledgeLibrary: React.FC = () => {
   const [assets, setAssets] = useState<BrandAsset[]>([]);
   const [sources, setSources] = useState<KnowledgeSource[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
+  const [rescoreJobs, setRescoreJobs] = useState<any[]>([]);
+  const [kbVersions, setKbVersions] = useState<any[]>([]);
+  const [selectedRescoreJob, setSelectedRescoreJob] = useState<any | null>(null);
+  const [rescoringTriggering, setRescoringTriggering] = useState(false);
+  const [selectedKbVersionId, setSelectedKbVersionId] = useState<string>('');
   const [loading, setLoading] = useState(true);
 
   // Onboarding & Upload modal state
@@ -110,6 +118,26 @@ export const KnowledgeLibrary: React.FC = () => {
     review_notes: ''
   });
 
+  // Round 3 Staged Excel & Brand Profile Modals
+  const [excelModalOpen, setExcelModalOpen] = useState(false);
+  const [brandProfileModalOpen, setBrandProfileModalOpen] = useState(false);
+  const [activating, setActivating] = useState(false);
+
+  const handleActivateKnowledgeBase = async () => {
+    const reason = prompt("Enter activation reason for new immutable manifest snapshot:", "Published new approved guidelines & catalogue baseline");
+    if (reason === null) return;
+    setActivating(true);
+    try {
+      const res = await api.activateKnowledgeBase(reason);
+      alert(`Knowledge Base Version ${res.version_num} activated successfully!\nSHA-256 Manifest: ${res.manifest_sha256.substring(0, 16)}...\nProducts: ${res.counts.products}, Claims: ${res.counts.claims}, Disclosures: ${res.counts.required_disclosures}`);
+      await loadData();
+    } catch (err: any) {
+      alert(`Activation error: ${err.message}`);
+    } finally {
+      setActivating(false);
+    }
+  };
+
   // Reprocessing state
   const [reprocessingId, setReprocessingId] = useState<string | null>(null);
 
@@ -138,18 +166,22 @@ export const KnowledgeLibrary: React.FC = () => {
   const loadData = async (silent = false) => {
     try {
       if (!silent) setLoading(true);
-      const [r, f, a, s, b] = await Promise.all([
+      const [r, f, a, s, b, rJobs, versions] = await Promise.all([
         api.getRules(),
         api.getFacts(),
         api.getAssets(),
         api.getKnowledgeSources(),
         api.getBrands(),
+        api.getRescoreJobs().catch(() => []),
+        api.getKnowledgeBaseVersions().catch(() => [])
       ]);
       setRules(r);
       setFacts(f);
       setAssets(a);
       setSources(s);
       setBrands(b);
+      setRescoreJobs(rJobs || []);
+      setKbVersions(versions || []);
       if (b.length > 0 && !selectedBrandId) {
         setSelectedBrandId(b[0].id);
       }
@@ -573,6 +605,34 @@ export const KnowledgeLibrary: React.FC = () => {
     }
   };
 
+  const handleTriggerRescore = async () => {
+    setRescoringTriggering(true);
+    try {
+      const res = await api.triggerRescoreJob({
+        knowledge_base_version_id: selectedKbVersionId || undefined
+      });
+      alert(`Simulation job launched successfully!\nEvaluated ${res.completed_items || res.total_items} historical assets against Version ${res.version_num}.\nAudit trails and historical manifests remain 100% immutable.`);
+      await loadData(true);
+      if (res.job_id) {
+        const fullJob = await api.getRescoreJob(res.job_id);
+        setSelectedRescoreJob(fullJob);
+      }
+    } catch (err: any) {
+      alert(`Simulation error: ${err.message}`);
+    } finally {
+      setRescoringTriggering(false);
+    }
+  };
+
+  const handleSelectRescoreJob = async (jobId: string) => {
+    try {
+      const fullJob = await api.getRescoreJob(jobId);
+      setSelectedRescoreJob(fullJob);
+    } catch (err: any) {
+      alert(`Error fetching job details: ${err.message}`);
+    }
+  };
+
   const handleReprocessSource = async (sourceId: string, sourceTitle: string) => {
     const ok = window.confirm(
       `Reprocess '${sourceTitle}' using Gemini?\n\n` +
@@ -640,6 +700,31 @@ export const KnowledgeLibrary: React.FC = () => {
           </p>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
+          <button
+            onClick={() => setBrandProfileModalOpen(true)}
+            className="btn btn-secondary"
+            style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.82rem' }}
+          >
+            <BookOpen size={15} color="#818cf8" />
+            Brand Profile Form
+          </button>
+          <button
+            onClick={() => setExcelModalOpen(true)}
+            className="btn btn-secondary"
+            style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.82rem' }}
+          >
+            <FileSpreadsheet size={15} color="#34d399" />
+            Import Excel
+          </button>
+          <button
+            onClick={handleActivateKnowledgeBase}
+            disabled={activating}
+            className="btn btn-secondary"
+            style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.82rem', borderColor: 'rgba(99, 102, 241, 0.4)' }}
+          >
+            <ShieldCheck size={15} color="#60a5fa" />
+            {activating ? 'Activating...' : 'Activate Version'}
+          </button>
           <button
             onClick={() => setShowOnboardingGuide(!showOnboardingGuide)}
             className="btn btn-secondary"
@@ -864,6 +949,19 @@ export const KnowledgeLibrary: React.FC = () => {
             className={`tab-btn ${activeTab === 'sources' ? 'active' : ''}`}
           >
             Uploaded Sources ({sources.length})
+          </button>
+          <button
+            onClick={() => setActiveTab('rescore')}
+            className={`tab-btn ${activeTab === 'rescore' ? 'active' : ''}`}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          >
+            <RefreshCw size={13} />
+            Impact Rescoring Hub
+            {rescoreJobs.length > 0 && (
+              <span style={{ fontSize: '0.68rem', padding: '1px 6px', borderRadius: 999, background: 'rgba(99, 102, 241, 0.25)', color: '#a5b4fc', border: '1px solid rgba(99, 102, 241, 0.4)' }}>
+                {rescoreJobs.length}
+              </span>
+            )}
           </button>
         </div>
 
@@ -1212,6 +1310,345 @@ export const KnowledgeLibrary: React.FC = () => {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {activeTab === 'rescore' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+          {/* Simulation Header Banner */}
+          <div className="card" style={{
+            background: 'linear-gradient(135deg, rgba(30, 27, 75, 0.7) 0%, rgba(15, 23, 42, 0.9) 100%)',
+            border: '1px solid rgba(99, 102, 241, 0.35)',
+            position: 'relative',
+            overflow: 'hidden'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16 }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                  <span style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '4px 10px',
+                    borderRadius: 999,
+                    fontSize: '0.72rem',
+                    fontWeight: 600,
+                    background: 'rgba(99, 102, 241, 0.2)',
+                    color: '#a5b4fc',
+                    border: '1px solid rgba(99, 102, 241, 0.4)'
+                  }}>
+                    <ShieldCheck size={13} /> Non-Destructive Impact Simulation
+                  </span>
+                  <span style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    padding: '4px 10px',
+                    borderRadius: 999,
+                    fontSize: '0.72rem',
+                    fontWeight: 600,
+                    background: 'rgba(16, 185, 129, 0.15)',
+                    color: '#34d399',
+                    border: '1px solid rgba(16, 185, 129, 0.3)'
+                  }}>
+                    <CheckCircle size={13} /> 100% Immutable Historical Manifests
+                  </span>
+                </div>
+                <h2 className="title-md" style={{ color: '#f8fafc', fontSize: '1.25rem', marginBottom: 6 }}>
+                  Historical Knowledge Policy Rescoring Hub
+                </h2>
+                <p style={{ color: '#94a3b8', fontSize: '0.85rem', maxWidth: 700, margin: 0, lineHeight: 1.5 }}>
+                  Evaluate and measure the direct impact of activating new brand guidelines, product catalogue variants, or claim updates across your entire historical ad catalog. Original governance runs and baseline audit trails remain permanently untouched.
+                </p>
+              </div>
+
+              {isReviewer && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <select
+                    value={selectedKbVersionId}
+                    onChange={(e) => setSelectedKbVersionId(e.target.value)}
+                    className="input"
+                    style={{ minWidth: 200, fontSize: '0.82rem', padding: '8px 12px' }}
+                  >
+                    <option value="">Active Version (Default)</option>
+                    {kbVersions.map((v: any) => (
+                      <option key={v.id} value={v.id}>
+                        Version {v.version_num} ({v.version_tag || 'Standard'}) {v.is_active ? '— Active' : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={handleTriggerRescore}
+                    disabled={rescoringTriggering}
+                    className="btn btn-primary"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: '9px 16px',
+                      background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
+                      boxShadow: '0 4px 14px rgba(99, 102, 241, 0.4)'
+                    }}
+                  >
+                    <RefreshCw size={15} className={rescoringTriggering ? 'spin' : ''} />
+                    {rescoringTriggering ? 'Evaluating Catalog...' : 'Simulate Policy Rescore'}
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Past Simulation Batches */}
+          {rescoreJobs.length === 0 ? (
+            <div className="card" style={{ textAlign: 'center', padding: '48px 24px', border: '1px dashed var(--border-subtle)' }}>
+              <RefreshCw size={36} color="#6366f1" style={{ margin: '0 auto 16px', opacity: 0.6 }} />
+              <h3 style={{ fontSize: '1.05rem', color: '#f8fafc', marginBottom: 8 }}>No Rescoring Simulations Yet</h3>
+              <p style={{ fontSize: '0.85rem', color: '#94a3b8', maxWidth: 480, margin: '0 auto 20px' }}>
+                Trigger a simulation above to evaluate your historical content assets against the newly activated brand knowledge manifest.
+              </p>
+              {isReviewer && (
+                <button
+                  onClick={handleTriggerRescore}
+                  disabled={rescoringTriggering}
+                  className="btn btn-secondary"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}
+                >
+                  <RefreshCw size={14} /> Run First Simulation
+                </button>
+              )}
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: selectedRescoreJob ? '340px 1fr' : '1fr', gap: 20 }}>
+              {/* Jobs List */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Simulation Runs ({rescoreJobs.length})
+                </div>
+                {rescoreJobs.map((job: any) => {
+                  const isSelected = selectedRescoreJob?.id === job.id;
+                  return (
+                    <div
+                      key={job.id}
+                      onClick={() => handleSelectRescoreJob(job.id)}
+                      className="card hover-glow"
+                      style={{
+                        cursor: 'pointer',
+                        padding: 16,
+                        border: isSelected ? '1px solid #6366f1' : '1px solid var(--border-subtle)',
+                        background: isSelected ? 'rgba(99, 102, 241, 0.12)' : 'var(--card-bg)',
+                        transition: 'all 0.2s ease'
+                      }}
+                    >
+                      <div className="flex-between" style={{ marginBottom: 6 }}>
+                        <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#f8fafc' }}>
+                          Target Version {job.version_num || 'Active'}
+                        </span>
+                        <span style={{
+                          fontSize: '0.7rem',
+                          padding: '2px 8px',
+                          borderRadius: 999,
+                          fontWeight: 600,
+                          background: job.status === 'completed' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(234, 179, 8, 0.2)',
+                          color: job.status === 'completed' ? '#34d399' : '#facc15'
+                        }}>
+                          {job.status}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'flex', justifyContent: 'space-between' }}>
+                        <span>Assets evaluated: {job.completed_items || job.total_items}</span>
+                        <span>{new Date(job.created_at).toLocaleDateString()}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Selected Job Detail View */}
+              {selectedRescoreJob && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+                  {/* Job Metrics Summary */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+                    <div className="card" style={{ padding: 14, textAlign: 'center' }}>
+                      <div style={{ fontSize: '0.72rem', color: '#94a3b8', textTransform: 'uppercase' }}>Assets Evaluated</div>
+                      <div style={{ fontSize: '1.4rem', fontWeight: 700, color: '#f8fafc', marginTop: 4 }}>
+                        {selectedRescoreJob.total_items || 0}
+                      </div>
+                    </div>
+                    <div className="card" style={{ padding: 14, textAlign: 'center' }}>
+                      <div style={{ fontSize: '0.72rem', color: '#94a3b8', textTransform: 'uppercase' }}>Regressed (New Issues)</div>
+                      <div style={{ fontSize: '1.4rem', fontWeight: 700, color: '#f87171', marginTop: 4 }}>
+                        {selectedRescoreJob.items?.filter((it: any) =>
+                          (it.status_before === 'approved' && it.status_after !== 'approved') ||
+                          (it.overall_score_after < it.overall_score_before)
+                        ).length || 0}
+                      </div>
+                    </div>
+                    <div className="card" style={{ padding: 14, textAlign: 'center' }}>
+                      <div style={{ fontSize: '0.72rem', color: '#94a3b8', textTransform: 'uppercase' }}>Improved / Compliant</div>
+                      <div style={{ fontSize: '1.4rem', fontWeight: 700, color: '#34d399', marginTop: 4 }}>
+                        {selectedRescoreJob.items?.filter((it: any) =>
+                          (it.status_before !== 'approved' && it.status_after === 'approved') ||
+                          (it.overall_score_after > it.overall_score_before)
+                        ).length || 0}
+                      </div>
+                    </div>
+                    <div className="card" style={{ padding: 14, textAlign: 'center' }}>
+                      <div style={{ fontSize: '0.72rem', color: '#94a3b8', textTransform: 'uppercase' }}>Unaffected / Neutral</div>
+                      <div style={{ fontSize: '1.4rem', fontWeight: 700, color: '#94a3b8', marginTop: 4 }}>
+                        {selectedRescoreJob.items?.filter((it: any) =>
+                          it.overall_score_after === it.overall_score_before && it.status_before === it.status_after
+                        ).length || 0}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Rescore Batch Items Table */}
+                  <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                    <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <h3 style={{ fontSize: '0.92rem', fontWeight: 600, color: '#f8fafc', margin: 0 }}>
+                        Catalog Impact Analysis ({selectedRescoreJob.items?.length || 0} assets)
+                      </h3>
+                      <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
+                        Version {selectedRescoreJob.version_num} Simulation
+                      </span>
+                    </div>
+
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                        <thead>
+                          <tr style={{ background: 'rgba(15, 23, 42, 0.6)', borderBottom: '1px solid var(--border-subtle)', textAlign: 'left', color: '#94a3b8' }}>
+                            <th style={{ padding: '10px 16px' }}>Content Item</th>
+                            <th style={{ padding: '10px 16px' }}>Prior Baseline</th>
+                            <th style={{ padding: '10px 16px' }}>Rescored Impact</th>
+                            <th style={{ padding: '10px 16px' }}>Findings Shift</th>
+                            <th style={{ padding: '10px 16px' }}>Transition Verdict</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(!selectedRescoreJob.items || selectedRescoreJob.items.length === 0) ? (
+                            <tr>
+                              <td colSpan={5} style={{ padding: 24, textAlign: 'center', color: '#94a3b8' }}>
+                                No evaluated item details available.
+                              </td>
+                            </tr>
+                          ) : (
+                            selectedRescoreJob.items.map((item: any) => {
+                              const isRegressed =
+                                (item.status_before === 'approved' && item.status_after !== 'approved') ||
+                                (item.overall_score_after < item.overall_score_before);
+                              const isImproved =
+                                (item.status_before !== 'approved' && item.status_after === 'approved') ||
+                                (item.overall_score_after > item.overall_score_before);
+
+                              return (
+                                <tr key={item.id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                                  <td style={{ padding: '12px 16px', fontWeight: 500, color: '#f8fafc' }}>
+                                    <div>{item.content_item_title || 'Historical Asset'}</div>
+                                    <div style={{ fontSize: '0.72rem', color: '#64748b' }}>
+                                      Version {item.content_version_num || 1} • {item.content_item_channel || 'all'}
+                                    </div>
+                                  </td>
+                                  <td style={{ padding: '12px 16px' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                      <span style={{
+                                        fontSize: '0.72rem',
+                                        padding: '2px 8px',
+                                        borderRadius: 4,
+                                        fontWeight: 600,
+                                        background: item.status_before === 'approved' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)',
+                                        color: item.status_before === 'approved' ? '#34d399' : '#f87171'
+                                      }}>
+                                        {item.status_before || 'unscored'}
+                                      </span>
+                                      <span style={{ color: '#94a3b8', fontSize: '0.8rem' }}>
+                                        {item.overall_score_before != null ? `${item.overall_score_before}%` : '—'}
+                                      </span>
+                                    </div>
+                                  </td>
+                                  <td style={{ padding: '12px 16px' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                      <span style={{
+                                        fontSize: '0.72rem',
+                                        padding: '2px 8px',
+                                        borderRadius: 4,
+                                        fontWeight: 600,
+                                        background: item.status_after === 'approved' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)',
+                                        color: item.status_after === 'approved' ? '#34d399' : '#f87171'
+                                      }}>
+                                        {item.status_after || 'unscored'}
+                                      </span>
+                                      <span style={{ color: '#f8fafc', fontWeight: 600, fontSize: '0.8rem' }}>
+                                        {item.overall_score_after != null ? `${item.overall_score_after}%` : '—'}
+                                      </span>
+                                    </div>
+                                  </td>
+                                  <td style={{ padding: '12px 16px', color: '#94a3b8', fontSize: '0.76rem' }}>
+                                    {item.critical_findings_diff > 0 && (
+                                      <div style={{ color: '#f87171' }}>+{item.critical_findings_diff} Critical</div>
+                                    )}
+                                    {item.major_findings_diff > 0 && (
+                                      <div style={{ color: '#fb923c' }}>+{item.major_findings_diff} Major</div>
+                                    )}
+                                    {item.critical_findings_diff <= 0 && item.major_findings_diff <= 0 && (
+                                      <span style={{ color: '#64748b' }}>No new violations</span>
+                                    )}
+                                  </td>
+                                  <td style={{ padding: '12px 16px' }}>
+                                    {isRegressed ? (
+                                      <span style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: 4,
+                                        fontSize: '0.72rem',
+                                        fontWeight: 600,
+                                        padding: '3px 8px',
+                                        borderRadius: 999,
+                                        background: 'rgba(239, 68, 68, 0.15)',
+                                        color: '#f87171',
+                                        border: '1px solid rgba(239, 68, 68, 0.3)'
+                                      }}>
+                                        <AlertTriangle size={12} /> Regressed
+                                      </span>
+                                    ) : isImproved ? (
+                                      <span style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: 4,
+                                        fontSize: '0.72rem',
+                                        fontWeight: 600,
+                                        padding: '3px 8px',
+                                        borderRadius: 999,
+                                        background: 'rgba(16, 185, 129, 0.15)',
+                                        color: '#34d399',
+                                        border: '1px solid rgba(16, 185, 129, 0.3)'
+                                      }}>
+                                        <CheckCircle size={12} /> Improved
+                                      </span>
+                                    ) : (
+                                      <span style={{
+                                        fontSize: '0.72rem',
+                                        fontWeight: 500,
+                                        padding: '3px 8px',
+                                        borderRadius: 999,
+                                        background: 'rgba(100, 116, 139, 0.15)',
+                                        color: '#94a3b8'
+                                      }}>
+                                        Unaffected
+                                      </span>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -2412,6 +2849,26 @@ export const KnowledgeLibrary: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Round 3 Excel Import Modal */}
+      <ExcelImportModal
+        isOpen={excelModalOpen}
+        onClose={() => setExcelModalOpen(false)}
+        onSuccess={() => {
+          setExcelModalOpen(false);
+          loadData();
+        }}
+      />
+
+      {/* Round 3 Brand Profile Modal */}
+      <BrandProfileModal
+        isOpen={brandProfileModalOpen}
+        onClose={() => setBrandProfileModalOpen(false)}
+        onSaved={() => {
+          setBrandProfileModalOpen(false);
+          loadData();
+        }}
+      />
     </div>
   );
 };

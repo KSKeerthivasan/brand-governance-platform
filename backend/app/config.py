@@ -31,7 +31,34 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str | None = None
     GEMINI_MODEL: str = "gemini-3.8-flash"
     
-    CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000"
+    CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,https://ad-governance.web.app"
+    FRONTEND_URL: str = "https://ad-governance.web.app"
+    FRONTEND_BASE_URL: str = "https://ad-governance.web.app"
+    RESEND_API_KEY: str | None = None
+    INVITATION_EXPIRY_DAYS: int = 7
+
+    # Transactional SMTP configuration (Gmail SMTP)
+    SMTP_HOST: str = "smtp.gmail.com"
+    SMTP_PORT: int = 587
+    SMTP_EMAIL: str | None = None
+    SMTP_PASSWORD: str | None = None
+    SMTP_USE_TLS: bool = True
+    SMTP_SENDER_NAME: str = "Inkloom AI"
+
+    @property
+    def frontend_base_url(self) -> str:
+        """
+        Returns normalized frontend base URL for secure link generation.
+        Prioritizes FRONTEND_BASE_URL, falls back to FRONTEND_URL or default localhost.
+        In production, guarantees hosted URL and eliminates any localhost fallback.
+        """
+        raw = self.FRONTEND_BASE_URL or self.FRONTEND_URL
+        if self.ENVIRONMENT.lower() == "production":
+            if not raw or "localhost" in raw.lower() or "127.0.0.1" in raw:
+                return "https://ad-governance.web.app"
+            return raw.strip().rstrip("/")
+        raw = raw or "http://localhost:5173"
+        return raw.strip().rstrip("/")
 
     @property
     def cors_origins_list(self) -> List[str]:
@@ -50,6 +77,14 @@ class Settings(BaseSettings):
             if self.DEBUG:
                 errors.append("DEBUG mode cannot be enabled in production environment.")
             
+            # Frontend base URL checks (prevent localhost URLs in production invitations)
+            base_url = self.frontend_base_url.lower()
+            if "localhost" in base_url or "127.0.0.1" in base_url:
+                errors.append(
+                    f"FRONTEND_BASE_URL cannot point to localhost ('{self.frontend_base_url}') in production. "
+                    "Configure FRONTEND_BASE_URL=https://ad-governance.web.app in production environment."
+                )
+
             # Secret key checks
             insecure_key_patterns = ["dev", "secret", "change_me", "default", "password", "test"]
             if not self.SECRET_KEY or len(self.SECRET_KEY) < 32 or any(pat in self.SECRET_KEY.lower() for pat in insecure_key_patterns):

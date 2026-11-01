@@ -1,47 +1,73 @@
 import uuid
 import hashlib
 from datetime import datetime
-from sqlalchemy import Column, String, Text, Integer, Boolean, DateTime, ForeignKey, Index, UniqueConstraint
+from sqlalchemy import (
+    Column,
+    String,
+    Text,
+    Integer,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    UniqueConstraint,
+    CheckConstraint,
+)
 from sqlalchemy.orm import relationship
 from app.database import Base
 
 class ContentItem(Base):
     """
     Marketing content draft container.
+    Scoped to an organization and optionally associated with an organization product offering.
     """
     __tablename__ = "content_items"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     organization_id = Column(String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
     brand_id = Column(String(36), ForeignKey("brands.id", ondelete="CASCADE"), nullable=False, index=True)
+    product_id = Column(String(36), nullable=True, index=True)
     created_by = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    
+
     title = Column(String(255), nullable=False)
     channel = Column(String(100), default="Social Media", nullable=False)  # Social Media, Email Newsletter, Web Banner, Print Ad
     current_version_num = Column(Integer, default=1, nullable=False)
-    status = Column(String(50), default="draft", nullable=False)  # draft, submitted, approved, changes_requested, rejected
-    
+    status = Column(String(50), default="draft", nullable=False)  # draft, submitted, approved, changes_requested, rejected, archived
+
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
-    organization = relationship("Organization", back_populates="content_items")
+    organization = relationship("Organization", back_populates="content_items", overlaps="product,content_items")
     brand = relationship("Brand", back_populates="content_items")
+    product = relationship("Product", back_populates="content_items", foreign_keys=[product_id], overlaps="organization,content_items")
     creator = relationship("User", back_populates="content_created")
     versions = relationship("ContentVersion", back_populates="content_item", cascade="all, delete-orphan", order_by="ContentVersion.version_num")
     submissions = relationship("ApprovalSubmission", back_populates="content_item", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        UniqueConstraint("organization_id", "id", name="uq_content_items_org_id"),
+        ForeignKeyConstraint(
+            ["organization_id", "product_id"],
+            ["products.organization_id", "products.id"],
+            name="fk_content_items_org_product",
+            ondelete="RESTRICT",
+        ),
+    )
 
 
 class ContentVersion(Base):
     """
     Immutable version snapshot of marketing content.
     Includes sha256 checksum to guarantee content identity.
+    body_text is nullable for poster-only content versions where poster_file_path is populated.
     """
     __tablename__ = "content_versions"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     content_item_id = Column(String(36), ForeignKey("content_items.id", ondelete="CASCADE"), nullable=False, index=True)
     version_num = Column(Integer, nullable=False)
-    body_text = Column(Text, nullable=False)
+    body_text = Column(Text, nullable=True)  # Nullable when poster_file_path is provided
     checksum = Column(String(64), nullable=False)  # SHA-256
     created_by = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
@@ -61,9 +87,10 @@ class ContentVersion(Base):
     )
 
     @staticmethod
-    def calculate_checksum(text: str, poster_file_path: str | None = None) -> str:
+    def calculate_checksum(text: str | None, poster_file_path: str | None = None) -> str:
         hasher = hashlib.sha256()
-        hasher.update(text.encode("utf-8"))
+        if text:
+            hasher.update(text.encode("utf-8"))
         if poster_file_path:
             import os
             resolved_path = None
@@ -92,11 +119,17 @@ class ContentVersion(Base):
 class GovernanceRun(Base):
     """
     Execution record of the deterministic governance engine on a specific content version.
+    Explicitly tracks owning organization, immutable knowledge-base baseline, and legacy status.
     """
     __tablename__ = "governance_runs"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    organization_id = Column(String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
     content_version_id = Column(String(36), ForeignKey("content_versions.id", ondelete="CASCADE"), nullable=False, index=True)
+    knowledge_base_version_id = Column(String(36), nullable=True, index=True)
+    baseline_status = Column(String(50), default="legacy_unversioned", nullable=False)
+    trigger_type = Column(String(50), default="user_check", nullable=False)  # user_check, submission, guideline_update_rescore
+
     executed_by = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     overall_status = Column(String(50), nullable=False)  # passed, warnings, failed
     rules_evaluated_count = Column(Integer, default=0, nullable=False)
@@ -104,8 +137,23 @@ class GovernanceRun(Base):
     findings_count = Column(Integer, default=0, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
+    organization = relationship("Organization", foreign_keys=[organization_id])
     content_version = relationship("ContentVersion", back_populates="governance_runs")
+    knowledge_base_version = relationship("KnowledgeBaseVersion", foreign_keys=[knowledge_base_version_id])
     findings = relationship("GovernanceFinding", back_populates="governance_run", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["organization_id", "knowledge_base_version_id"],
+            ["knowledge_base_versions.organization_id", "knowledge_base_versions.id"],
+            name="fk_gov_runs_org_kb",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "baseline_status IN ('legacy_unversioned', 'seeded_baseline_v1', 'versioned')",
+            name="chk_gov_run_baseline_status",
+        ),
+    )
 
 
 class GovernanceFinding(Base):
@@ -118,22 +166,22 @@ class GovernanceFinding(Base):
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     governance_run_id = Column(String(36), ForeignKey("governance_runs.id", ondelete="CASCADE"), nullable=False, index=True)
     page_number = Column(Integer, nullable=True)  # 1-indexed for multi-page PDF pages, None for body text
-    
-    category = Column(String(50), nullable=False)  
+
+    category = Column(String(50), nullable=False)
     # prohibited_wording, product_fact_mismatch, unsupported_claim, claim_status_issue, mandatory_wording_missing, source_freshness_issue, missing_evidence, image_guideline_issue
-    
+
     severity = Column(String(20), nullable=False)  # critical, warning, info
     title = Column(String(255), nullable=False)
     explanation = Column(Text, nullable=False)
     text_excerpt = Column(Text, nullable=True)
-    
+
     matched_rule_id = Column(String(36), ForeignKey("knowledge_rules.id", ondelete="SET NULL"), nullable=True)
     matched_fact_id = Column(String(36), ForeignKey("knowledge_facts.id", ondelete="SET NULL"), nullable=True)
-    
+
     source_citation = Column(String(255), nullable=False)  # Document citation or "SUPPORTING EVIDENCE NOT FOUND"
     recommended_action = Column(Text, nullable=False)
     status = Column(String(50), default="unresolved", nullable=False)  # unresolved, resolved, ignored
-    
+
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     governance_run = relationship("GovernanceRun", back_populates="findings")
@@ -154,7 +202,7 @@ class ApprovalSubmission(Base):
     content_version_id = Column(String(36), ForeignKey("content_versions.id", ondelete="CASCADE"), nullable=False, index=True)
     governance_run_id = Column(String(36), ForeignKey("governance_runs.id", ondelete="SET NULL"), nullable=True)
     submitted_by = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    
+
     submission_notes = Column(Text, nullable=True)
     status = Column(String(50), default="pending", nullable=False)  # pending, approved, rejected, changes_requested
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
@@ -175,7 +223,7 @@ class ApprovalDecision(Base):
     approval_submission_id = Column(String(36), ForeignKey("approval_submissions.id", ondelete="CASCADE"), nullable=False, index=True)
     content_version_id = Column(String(36), ForeignKey("content_versions.id", ondelete="CASCADE"), nullable=False, index=True)
     decided_by = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    
+
     decision = Column(String(50), nullable=False)  # approved, rejected, changes_requested
     decision_label = Column(String(100), nullable=False)  # e.g., "Approved — Ready to Publish"
     comments = Column(Text, nullable=False)
@@ -189,8 +237,6 @@ class ApprovalDecision(Base):
 class ReviewerFindingDisposition(Base):
     """
     Evidence-based reviewer feedback tied to a specific governance finding and rule.
-    Captures whether findings represent confirmed issues, false positives, unclear guidelines,
-    or conflicting rules to drive knowledge improvement.
     """
     __tablename__ = "reviewer_finding_dispositions"
 
@@ -217,8 +263,6 @@ class ReviewerFindingDisposition(Base):
 class CorrectionSuggestion(Base):
     """
     Context-preserving correction suggestion linked to a specific finding and evaluated content version.
-    Stores original passage, proposed correction, explanation, evidence citations,
-    and applicability boundaries (body text vs non-editable artwork).
     """
     __tablename__ = "correction_suggestions"
 
@@ -227,10 +271,10 @@ class CorrectionSuggestion(Base):
     content_item_id = Column(String(36), ForeignKey("content_items.id", ondelete="CASCADE"), nullable=False, index=True)
     content_version_id = Column(String(36), ForeignKey("content_versions.id", ondelete="CASCADE"), nullable=False, index=True)
     source_checksum = Column(String(64), nullable=False)
-    
+
     target_type = Column(String(50), nullable=False)  # body_text, poster_image, pdf_page
     page_number = Column(Integer, nullable=True)  # 1-indexed for PDF pages
-    
+
     rule_id = Column(String(36), ForeignKey("knowledge_rules.id", ondelete="SET NULL"), nullable=True, index=True)
     rule_code = Column(String(50), nullable=True)
     fact_id = Column(String(36), ForeignKey("knowledge_facts.id", ondelete="SET NULL"), nullable=True, index=True)
@@ -241,12 +285,12 @@ class CorrectionSuggestion(Base):
     diff_preview = Column(Text, nullable=True)
     explanation = Column(Text, nullable=False)
     evidence_source = Column(String(255), nullable=False)
-    
+
     correction_type = Column(String(50), nullable=False)  # deterministic_replacement, mandatory_disclosure_insertion, factual_correction, tone_refinement, visual_remediation, manual_guidance
     confidence = Column(String(20), default="high", nullable=False)  # high, medium, manual_review
     can_auto_apply = Column(Boolean, default=False, nullable=False)
     status = Column(String(50), default="pending", nullable=False)  # pending, accepted, rejected, stale, applied
-    
+
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     resolved_at = Column(DateTime, nullable=True)
 
@@ -257,3 +301,19 @@ class CorrectionSuggestion(Base):
     fact = relationship("KnowledgeFact")
 
 
+from sqlalchemy import event, text
+
+@event.listens_for(GovernanceRun, "before_insert")
+def auto_populate_governance_run_org_id(mapper, connection, target):
+    if not target.organization_id and target.content_version_id:
+        row = connection.execute(
+            text("""
+                SELECT ci.organization_id
+                FROM content_versions cv
+                JOIN content_items ci ON cv.content_item_id = ci.id
+                WHERE cv.id = :cv_id
+            """),
+            {"cv_id": target.content_version_id}
+        ).fetchone()
+        if row and row[0]:
+            target.organization_id = row[0]

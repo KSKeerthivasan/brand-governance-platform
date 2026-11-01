@@ -1,6 +1,19 @@
 import uuid
-from datetime import datetime
-from sqlalchemy import Column, String, Text, Integer, Boolean, DateTime, ForeignKey, Index
+from datetime import datetime, timedelta
+from sqlalchemy import (
+    Column,
+    String,
+    Text,
+    Integer,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    ForeignKeyConstraint,
+    UniqueConstraint,
+    CheckConstraint,
+    JSON,
+    Index,
+)
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -55,7 +68,6 @@ class KnowledgeRule(Base):
     scope = Column(String(255), default="all_channels", nullable=True)  # all_channels, social_posts, packaging, etc.
     source_citation = Column(String(255), nullable=True)  # e.g., "Brand Guidelines PDF, Section 3.1, p. 5"
     
-    # Extended Stage 2 Structured Extraction Fields
     rule_code = Column(String(50), nullable=True, index=True)  # e.g. "FR-RULE-001"
     source_status = Column(String(50), default="unknown", nullable=True)  # approved, pending_review, expired, rejected
     enforcement_action = Column(String(50), default="flag_for_review", nullable=True)  # block, flag_for_review, escalate_to_human, warn
@@ -98,7 +110,6 @@ class KnowledgeFact(Base):
     fact_key = Column(String(255), nullable=False)  # e.g. "sugar_content", "organic_certified", "caffeine"
     fact_value = Column(String(500), nullable=False)  # e.g. "0g added sugar", "USDA Organic", "45mg natural caffeine"
     
-    # Extended Stage 2 Structured Extraction Fields
     product_id = Column(String(50), nullable=True, index=True)  # e.g. "FS-PROD-001"
     unit = Column(String(50), nullable=True)  # e.g. "mL", "g", "kcal", "%", "INR"
     value_status = Column(String(50), default="explicitly_stated", nullable=True)  # explicitly_stated, missing_not_provided, external_reference_needed
@@ -128,7 +139,7 @@ class KnowledgeFact(Base):
 class BrandAsset(Base):
     """
     Brand assets: logos, campaign creatives, product images.
-    Includes specs for image governance (Round 3 Improvement 3).
+    Includes specs for image governance and product linkage.
     """
     __tablename__ = "brand_assets"
 
@@ -136,6 +147,7 @@ class BrandAsset(Base):
     organization_id = Column(String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
     brand_id = Column(String(36), ForeignKey("brands.id", ondelete="SET NULL"), nullable=True, index=True)
     source_id = Column(String(36), ForeignKey("knowledge_sources.id", ondelete="SET NULL"), nullable=True, index=True)
+    associated_product_id = Column(String(36), ForeignKey("products.id", ondelete="SET NULL"), nullable=True, index=True)
     
     asset_name = Column(String(255), nullable=False)
     asset_type = Column(String(50), nullable=False)  # logo, product_image, campaign_creative
@@ -147,6 +159,7 @@ class BrandAsset(Base):
     color_mode = Column(String(20), nullable=True)  # RGB, CMYK, etc.
     min_clearance_px = Column(Integer, default=20, nullable=True)
     alt_text_required = Column(Boolean, default=True, nullable=False)
+    usage_notes = Column(Text, nullable=True)
     
     status = Column(String(50), default="pending_review", nullable=False)  # pending_review, approved, rejected
     reviewed_by = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
@@ -155,3 +168,154 @@ class BrandAsset(Base):
 
     source = relationship("KnowledgeSource", back_populates="assets")
     brand = relationship("Brand", back_populates="brand_assets")
+    associated_product = relationship("Product", back_populates="brand_assets", foreign_keys=[associated_product_id])
+
+
+class KnowledgeBaseVersion(Base):
+    """
+    Append-only immutable manifest of the complete organization brand governance knowledge base.
+    Protected against UPDATE and DELETE by PostgreSQL database trigger trg_protect_kb_version_immutability.
+    """
+    __tablename__ = "knowledge_base_versions"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    organization_id = Column(String(36), ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False, index=True)
+    version_num = Column(Integer, nullable=False)
+    manifest_sha256 = Column(String(64), nullable=False)
+    manifest_data = Column(JSON, nullable=False)
+    activated_by = Column(String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=True)
+    activated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    activation_reason = Column(String(255), nullable=False)
+
+    organization = relationship("Organization", foreign_keys=[organization_id])
+    activator = relationship("User", foreign_keys=[activated_by])
+
+    __table_args__ = (
+        UniqueConstraint("organization_id", "id", name="uq_kb_versions_org_id"),
+        UniqueConstraint("organization_id", "version_num", name="uq_kb_versions_org_num"),
+    )
+
+
+class OrganizationActiveKnowledgeBase(Base):
+    """
+    Pointer table to the currently active immutable knowledge base version for each organization.
+    Ensures knowledge_base_versions remains purely append-only without mutable status flags.
+    """
+    __tablename__ = "organization_active_knowledge_bases"
+
+    organization_id = Column(String(36), ForeignKey("organizations.id", ondelete="CASCADE"), primary_key=True)
+    active_version_id = Column(String(36), ForeignKey("knowledge_base_versions.id", ondelete="RESTRICT"), nullable=False)
+    activated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    activated_by = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    organization = relationship("Organization", foreign_keys=[organization_id])
+    active_version = relationship("KnowledgeBaseVersion", foreign_keys=[active_version_id])
+
+
+class StagedImport(Base):
+    """
+    Container for staged bulk Excel imports (Product Catalogue, Claims Register).
+    Guarantees validation previews do not mutate active records and commits atomically.
+    """
+    __tablename__ = "staged_imports"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    organization_id = Column(String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    import_type = Column(String(50), nullable=False)  # product_catalogue, claims_and_disclosures
+    idempotency_key = Column(String(64), nullable=False)
+    file_name = Column(String(255), nullable=False)
+    file_sha256 = Column(String(64), nullable=False)
+    status = Column(String(50), default="pending_preview", nullable=False)  # pending_preview, committed, failed, discarded
+    total_rows = Column(Integer, default=0, nullable=False)
+    valid_rows = Column(Integer, default=0, nullable=False)
+    error_rows = Column(Integer, default=0, nullable=False)
+    has_disclosures = Column(Boolean, default=False, nullable=False)
+    validation_summary = Column(JSON, default=dict, nullable=False)
+    created_by = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    expires_at = Column(DateTime, default=lambda: datetime.utcnow() + timedelta(hours=24), nullable=False)
+
+    organization = relationship("Organization", foreign_keys=[organization_id])
+    creator = relationship("User", foreign_keys=[created_by])
+    staged_products = relationship("StagedImportProductRow", back_populates="import_session", cascade="all, delete-orphan")
+    staged_claims = relationship("StagedImportClaimRow", back_populates="import_session", cascade="all, delete-orphan")
+    staged_disclosures = relationship("StagedImportDisclosureRow", back_populates="import_session", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        UniqueConstraint("organization_id", "id", name="uq_staged_imports_org_id"),
+        UniqueConstraint("organization_id", "idempotency_key", name="uq_staged_imports_org_idempotency"),
+        CheckConstraint("import_type IN ('product_catalogue', 'claims_and_disclosures')", name="chk_staged_import_type"),
+        CheckConstraint("status IN ('pending_preview', 'committed', 'failed', 'discarded')", name="chk_staged_import_status"),
+    )
+
+
+class StagedImportProductRow(Base):
+    __tablename__ = "staged_import_product_rows"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    organization_id = Column(String(36), nullable=False, index=True)
+    import_id = Column(String(36), nullable=False, index=True)
+    row_number = Column(Integer, nullable=False)
+    raw_data = Column(JSON, nullable=False)
+    parsed_data = Column(JSON, nullable=True)
+    validation_errors = Column(JSON, default=list, nullable=False)
+    is_valid = Column(Boolean, default=False, nullable=False)
+
+    import_session = relationship("StagedImport", back_populates="staged_products")
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["organization_id", "import_id"],
+            ["staged_imports.organization_id", "staged_imports.id"],
+            name="fk_staged_products_import",
+            ondelete="CASCADE",
+        ),
+    )
+
+
+class StagedImportClaimRow(Base):
+    __tablename__ = "staged_import_claim_rows"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    organization_id = Column(String(36), nullable=False, index=True)
+    import_id = Column(String(36), nullable=False, index=True)
+    row_number = Column(Integer, nullable=False)
+    raw_data = Column(JSON, nullable=False)
+    parsed_data = Column(JSON, nullable=True)
+    validation_errors = Column(JSON, default=list, nullable=False)
+    is_valid = Column(Boolean, default=False, nullable=False)
+
+    import_session = relationship("StagedImport", back_populates="staged_claims")
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["organization_id", "import_id"],
+            ["staged_imports.organization_id", "staged_imports.id"],
+            name="fk_staged_claims_import",
+            ondelete="CASCADE",
+        ),
+    )
+
+
+class StagedImportDisclosureRow(Base):
+    __tablename__ = "staged_import_disclosure_rows"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    organization_id = Column(String(36), nullable=False, index=True)
+    import_id = Column(String(36), nullable=False, index=True)
+    row_number = Column(Integer, nullable=False)
+    raw_data = Column(JSON, nullable=False)
+    parsed_data = Column(JSON, nullable=True)
+    validation_errors = Column(JSON, default=list, nullable=False)
+    is_valid = Column(Boolean, default=False, nullable=False)
+
+    import_session = relationship("StagedImport", back_populates="staged_disclosures")
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["organization_id", "import_id"],
+            ["staged_imports.organization_id", "staged_imports.id"],
+            name="fk_staged_disclosures_import",
+            ondelete="CASCADE",
+        ),
+    )

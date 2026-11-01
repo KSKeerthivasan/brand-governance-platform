@@ -3,14 +3,17 @@ import re
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Set, Tuple
 from sqlalchemy.orm import Session
-from app.models.knowledge import KnowledgeRule, KnowledgeFact
+from app.models.knowledge import KnowledgeRule, KnowledgeFact, KnowledgeBaseVersion, OrganizationActiveKnowledgeBase
 from app.models.content import ContentVersion, GovernanceRun, GovernanceFinding
+from app.models.product import Product
+from app.models.claim import Claim
+from app.models.brand import BrandProfile
 from app.services.image_governance import image_governance
 from app.services.ocr_service import ocr_service, OCRResult
 from app.services.pdf_service import pdf_service, PDFValidationError, PDFRenderError
 from app.services.storage import storage_service
 
-# Canonical Freshsip products mapping (SKU -> aliases)
+# Fallback canonical products mapping for backward compatibility
 CANONICAL_PRODUCTS: Dict[str, List[str]] = {
     "FS-PROD-001": [
         "valencia orange cold-pressed juice", "valencia orange juice", "valencia orange", "fs-prod-001"
@@ -84,22 +87,36 @@ class GovernanceEngine:
         self,
         text: str,
         title: str,
-        explicit_product_id: Optional[str] = None
+        explicit_product_id: Optional[str] = None,
+        products: Optional[List[Any]] = None
     ) -> List[str]:
-        """Identify which canonical Freshsip SKUs are mentioned or targeted in the copy."""
+        """Identify which SKUs are mentioned or targeted in the copy."""
+        product_map: Dict[str, List[str]] = {}
+        if products:
+            for p in products:
+                aliases = [p.product_id.lower()]
+                if getattr(p, "product_name", None):
+                    aliases.append(p.product_name.lower())
+                if p.product_id in CANONICAL_PRODUCTS:
+                    aliases.extend(CANONICAL_PRODUCTS[p.product_id])
+                if getattr(p, "sku", None):
+                    aliases.append(p.sku.lower())
+                if getattr(p, "product_name", None) and getattr(p, "variant_name", None):
+                    aliases.append(f"{p.product_name.lower()} {p.variant_name.lower()}")
+                product_map[p.product_id] = list(dict.fromkeys(aliases))
+        else:
+            product_map = CANONICAL_PRODUCTS
+
         if explicit_product_id:
-            pid = explicit_product_id.strip().upper()
-            if pid in CANONICAL_PRODUCTS:
-                return [pid]
-            # Check by name matching if a name was passed instead of SKU
-            for sku, aliases in CANONICAL_PRODUCTS.items():
-                if any(alias in pid.lower() for alias in aliases):
+            pid = explicit_product_id.strip()
+            for sku, aliases in product_map.items():
+                if pid.lower() == sku.lower() or any(alias == pid.lower() for alias in aliases):
                     return [sku]
             return [pid]
 
         combined = f"{title} {text}".lower()
         matched_skus: List[str] = []
-        for sku, aliases in CANONICAL_PRODUCTS.items():
+        for sku, aliases in product_map.items():
             for alias in aliases:
                 if re.search(rf"\b{re.escape(alias)}\b", combined):
                     if sku not in matched_skus:
@@ -170,6 +187,8 @@ class GovernanceEngine:
         title = content_item.title if content_item else ""
         brand_id = content_item.brand_id if content_item else None
         org_id = content_item.organization_id if content_item else None
+        if not product_id and content_item and content_item.product_id:
+            product_id = content_item.product_id
         now = datetime.utcnow()
 
         findings: List[GovernanceFinding] = []
@@ -253,12 +272,115 @@ class GovernanceEngine:
                     status="unresolved"
                 ))
 
+        # Resolve active knowledge base version, brand profile, and products for this organization
+        active_kb = db.query(OrganizationActiveKnowledgeBase).filter(
+            OrganizationActiveKnowledgeBase.organization_id == org_id
+        ).first() if org_id else None
+        kb_version_id = active_kb.active_version_id if active_kb else None
+        baseline_status = "versioned" if kb_version_id else "legacy_unversioned"
+
+        brand_profile = db.query(BrandProfile).filter(
+            BrandProfile.organization_id == org_id
+        ).first() if org_id else None
+        brand_name = brand_profile.brand_name if brand_profile else "Brand"
+
+        org_products = db.query(Product).filter(
+            Product.organization_id == org_id,
+            Product.record_status == "Active"
+        ).all() if org_id else []
+
+        # Typography Hierarchy Heuristic Evaluation (Milestone 5 / Round 3 Input 1 Section D)
+        if ocr_result and getattr(ocr_result, "regions", None) and len(ocr_result.regions) >= 2:
+            try:
+                region_heights = []
+                for reg in ocr_result.regions:
+                    if getattr(reg, "bbox", None) and len(reg.bbox) >= 4:
+                        ys = [pt[1] for pt in reg.bbox]
+                        h = max(ys) - min(ys)
+                        if h > 5:
+                            region_heights.append(h)
+                if len(region_heights) >= 2:
+                    region_heights.sort()
+                    max_h = region_heights[-1]
+                    median_h = region_heights[len(region_heights) // 2]
+                    ratio = max_h / max(median_h, 1.0)
+                    if ratio >= 1.5:
+                        findings.append(GovernanceFinding(
+                            category="layout",
+                            severity="info",
+                            title="Typography Hierarchy Heuristic Signal: Positive",
+                            explanation=f"Headline-to-body typography hierarchy detected (ratio {ratio:.1f}x >= 1.5x threshold). Note: Bounding box scale is a heuristic signal only and does not identify actual font families or guarantee typography compliance.",
+                            text_excerpt=f"Max font height: ~{int(max_h)}px, Median height: ~{int(median_h)}px (Ratio: {ratio:.1f}x)",
+                            matched_rule_id=None,
+                            matched_fact_id=None,
+                            source_citation=f"{brand_name} Brand Guidelines, Typography",
+                            recommended_action="Heuristic signal verified. Human review recommended to confirm approved font families.",
+                            status="passed_check"
+                        ))
+                    else:
+                        findings.append(GovernanceFinding(
+                            category="layout",
+                            severity="warning",
+                            title="Typography Hierarchy Weak: Review Recommended",
+                            explanation=f"Detected headline-to-body height ratio ({ratio:.1f}x) falls below the 1.5x hierarchy heuristic threshold. Headline may lack visual prominence over body text.",
+                            text_excerpt=f"Max font height: ~{int(max_h)}px, Median height: ~{int(median_h)}px (Ratio: {ratio:.1f}x)",
+                            matched_rule_id=None,
+                            matched_fact_id=None,
+                            source_citation=f"{brand_name} Brand Guidelines, Typography",
+                            recommended_action="Ensure clear visual contrast between headlines and body text per brand typography instructions.",
+                            status="unresolved"
+                        ))
+                else:
+                    findings.append(GovernanceFinding(
+                        category="layout",
+                        severity="info",
+                        title="Typography Hierarchy: unable_to_verify",
+                        explanation="Insufficient distinct text regions detected by OCR to evaluate typography hierarchy heuristic. Manual review required.",
+                        text_excerpt=None,
+                        matched_rule_id=None,
+                        matched_fact_id=None,
+                        source_citation=f"{brand_name} Brand Guidelines, Typography",
+                        recommended_action="Verify typography hierarchy manually in creative asset.",
+                        status="passed_check"
+                    ))
+            except Exception:
+                pass
+        elif content_version.poster_file_path:
+            findings.append(GovernanceFinding(
+                category="layout",
+                severity="info",
+                title="Typography Hierarchy: unable_to_verify",
+                explanation="Unable to verify typography hierarchy: insufficient or ambiguous OCR data from poster image.",
+                text_excerpt=None,
+                matched_rule_id=None,
+                matched_fact_id=None,
+                source_citation=f"{brand_name} Brand Guidelines, Typography",
+                recommended_action="Perform manual visual inspection of font hierarchy.",
+                status="passed_check"
+            ))
+
         # Step 1: Detect product context across caption + poster
         combined_source_text = f"{title} {body_text} {poster_text}"
-        detected_products = self.detect_product_context(combined_source_text, title, product_id)
+        detected_products = self.detect_product_context(combined_source_text, title, product_id, products=org_products)
         is_corporate_content = len(detected_products) == 0
 
         # Step 2: Query active approved rules
+        active_kb = db.query(OrganizationActiveKnowledgeBase).filter(
+            OrganizationActiveKnowledgeBase.organization_id == org_id
+        ).first() if org_id else None
+        kb_version_id = active_kb.active_version_id if active_kb else None
+        baseline_status = "versioned" if kb_version_id else "legacy_unversioned"
+
+        brand_profile = db.query(BrandProfile).filter(
+            BrandProfile.organization_id == org_id
+        ).first() if org_id else None
+        brand_name = brand_profile.brand_name if brand_profile else "Brand"
+
+        org_products = db.query(Product).filter(
+            Product.organization_id == org_id,
+            Product.record_status == "Active"
+        ).all() if org_id else []
+
         approved_rules = db.query(KnowledgeRule).filter(
             KnowledgeRule.organization_id == org_id,
             KnowledgeRule.status == "approved"
@@ -294,10 +416,16 @@ class GovernanceEngine:
                 continue
 
             rules_evaluated_count += 1
-            sub_patterns = [p.strip() for p in rule.pattern.split(",") if p.strip()] if "," in rule.pattern else [rule.pattern.strip()]
+            if "|" in rule.pattern:
+                sub_patterns = [p.strip() for p in rule.pattern.split("|") if p.strip()]
+            elif "," in rule.pattern:
+                sub_patterns = [p.strip() for p in rule.pattern.split(",") if p.strip()]
+            else:
+                sub_patterns = [rule.pattern.strip()]
 
             for pat in sub_patterns:
-                pattern_escaped = re.escape(pat)
+                clean_pat = pat.replace(r"\.", ".").strip()
+                pattern_escaped = re.escape(clean_pat)
                 regex = re.compile(rf"\b{pattern_escaped}\b", re.IGNORECASE)
 
                 match_caption = regex.search(body_text) if body_text else None
@@ -321,7 +449,7 @@ class GovernanceEngine:
                             explanation=f"Phrase '{pat}' appeared in a qualifying or negated context in both caption and poster. Rule: {rule.title}.",
                             text_excerpt=self._extract_excerpt(body_text, match_caption.start(), match_caption.end()),
                             matched_rule_id=rule.id,
-                            source_citation=rule.source_citation or "freshsip_brand_guidelines.pdf",
+                            source_citation=rule.source_citation or f"{brand_name} Brand Guidelines",
                             recommended_action="No action required if used strictly to clarify or negate unverified claims.",
                             status="passed_check"
                         ))
@@ -337,7 +465,7 @@ class GovernanceEngine:
                             explanation=f"Content contains prohibited language '{pat}' in both caption copy and attached poster image. Rule: {rule.title}. Reason: {rule.explanation}",
                             text_excerpt=f"Caption: '{c_excerpt}' | Poster: '{p_text}'{bbox_str}",
                             matched_rule_id=rule.id,
-                            source_citation=rule.source_citation or "freshsip_brand_guidelines.pdf",
+                            source_citation=rule.source_citation or f"{brand_name} Brand Guidelines",
                             recommended_action=f"Remove or rephrase '{pat}' from caption and poster artwork. Action: {rule.enforcement_action or 'block'}.",
                             status="unresolved"
                         ))
@@ -352,7 +480,7 @@ class GovernanceEngine:
                             explanation=f"Phrase '{pat}' appeared in a qualifying or negated context in caption copy. Rule: {rule.title}. Reason: {rule.explanation}",
                             text_excerpt=self._extract_excerpt(body_text, match_caption.start(), match_caption.end()),
                             matched_rule_id=rule.id,
-                            source_citation=rule.source_citation or "freshsip_brand_guidelines.pdf",
+                            source_citation=rule.source_citation or f"{brand_name} Brand Guidelines",
                             recommended_action="No action required if used strictly to clarify or negate unverified claims.",
                             status="passed_check"
                         ))
@@ -364,7 +492,7 @@ class GovernanceEngine:
                             explanation=f"Caption copy contains prohibited language '{pat}'. Rule: {rule.title}. Context condition: {rule.context_condition or 'All channels'}. Reason: {rule.explanation}",
                             text_excerpt=self._extract_excerpt(body_text, match_caption.start(), match_caption.end()),
                             matched_rule_id=rule.id,
-                            source_citation=rule.source_citation or "freshsip_brand_guidelines.pdf",
+                            source_citation=rule.source_citation or f"{brand_name} Brand Guidelines",
                             recommended_action=f"Remove or rephrase '{pat}' from caption copy. Action: {rule.enforcement_action or 'block'}.",
                             status="unresolved"
                         ))
@@ -379,7 +507,7 @@ class GovernanceEngine:
                             explanation=f"Phrase '{pat}' appeared in a qualifying or negated context in attached poster image. Rule: {rule.title}.",
                             text_excerpt=pat,
                             matched_rule_id=rule.id,
-                            source_citation=rule.source_citation or "freshsip_brand_guidelines.pdf",
+                            source_citation=rule.source_citation or f"{brand_name} Brand Guidelines",
                             recommended_action="No action required if used strictly to clarify or negate unverified claims.",
                             status="passed_check"
                         ))
@@ -394,7 +522,7 @@ class GovernanceEngine:
                             explanation=f"Attached poster image contains prohibited language '{pat}'. Rule: {rule.title}. Context condition: {rule.context_condition or 'All channels'}. Reason: {rule.explanation}",
                             text_excerpt=f"Poster: '{p_text}'{bbox_str}",
                             matched_rule_id=rule.id,
-                            source_citation=rule.source_citation or "freshsip_brand_guidelines.pdf",
+                            source_citation=rule.source_citation or f"{brand_name} Brand Guidelines",
                             recommended_action=f"Remove or replace poster graphic containing '{pat}'. Action: {rule.enforcement_action or 'block'}.",
                             status="unresolved"
                         ))
@@ -427,7 +555,7 @@ class GovernanceEngine:
                             explanation="Garden Tomato Celery Press (FS-PROD-003) must disclose 'Contains Celery (14%)' on product descriptions, packaging, and listings (checked in caption and poster).",
                             text_excerpt=None,
                             matched_rule_id=rule.id,
-                            source_citation=rule.source_citation or "freshsip_brand_guidelines.pdf, Section E, p. 5",
+                            source_citation=rule.source_citation or f"{brand_name} Brand Guidelines, Section E, p. 5",
                             recommended_action="Add mandatory allergen statement: 'Contains Celery (14%)' in copy or poster artwork.",
                             status="unresolved"
                         ))
@@ -442,7 +570,7 @@ class GovernanceEngine:
                             explanation="Spiced Carrot Beetroot Press (FS-PROD-004) has allergen status marked 'not_provided'. Claiming allergen-free in caption or poster violates brand guidelines.",
                             text_excerpt=None,
                             matched_rule_id=rule.id,
-                            source_citation=rule.source_citation or "freshsip_brand_guidelines.pdf, Section E, p. 5",
+                            source_citation=rule.source_citation or f"{brand_name} Brand Guidelines, Section E, p. 5",
                             recommended_action="Remove allergen-free claim or upload certified allergen cross-contact test results.",
                             status="unresolved"
                         ))
@@ -460,7 +588,7 @@ class GovernanceEngine:
                             explanation="When describing sugar content in fruit/vegetable juices, approved policy requires stating 'No Added Sugar' rather than 'Zero Sugar' (checked in caption and poster).",
                             text_excerpt=None,
                             matched_rule_id=rule.id,
-                            source_citation=rule.source_citation or "freshsip_brand_guidelines.pdf, Section C, p. 3",
+                            source_citation=rule.source_citation or f"{brand_name} Brand Guidelines, Section C, p. 3",
                             recommended_action="Use 'No Added Sugar' and acknowledge naturally occurring fruit sugars.",
                             status="unresolved"
                         ))
@@ -480,7 +608,7 @@ class GovernanceEngine:
                             explanation=f"Required brand tagline '{rule.pattern}' was not found in campaign copy or poster artwork.",
                             text_excerpt=None,
                             matched_rule_id=rule.id,
-                            source_citation=rule.source_citation or "freshsip_brand_guidelines.pdf, Section 2.1, p. 4",
+                            source_citation=rule.source_citation or f"{brand_name} Brand Guidelines, Section 2.1, p. 4",
                             recommended_action=f"Include brand tagline '{rule.pattern}' in copy or poster.",
                             status="unresolved"
                         ))
@@ -497,7 +625,7 @@ class GovernanceEngine:
                         explanation=f"Required wording '{rule.pattern}' was not found in copy or poster artwork. {rule.explanation}",
                         text_excerpt=None,
                         matched_rule_id=rule.id,
-                        source_citation=rule.source_citation or "freshsip_brand_guidelines.pdf",
+                        source_citation=rule.source_citation or f"{brand_name} Brand Guidelines",
                         recommended_action=f"Include the required wording '{rule.pattern}' in the text or poster.",
                         status="unresolved"
                     ))
@@ -512,11 +640,11 @@ class GovernanceEngine:
                     category="missing_evidence",
                     severity="warning",
                     title="Missing Product Context: Unattributed Specification Claim",
-                    explanation=f"Content mentions '{unattributed_claim.group(0)}' without specifying which Freshsip SKU is referenced. Product fact verification requires identifying the product.",
+                    explanation=f"Content mentions '{unattributed_claim.group(0)}' without specifying which {brand_name} SKU is referenced. Product fact verification requires identifying the product.",
                     text_excerpt=unattributed_claim.group(0),
                     matched_rule_id=None,
                     matched_fact_id=None,
-                    source_citation="freshsip_products.csv",
+                    source_citation=f"{brand_name} Product Catalogue",
                     recommended_action="Specify the exact product name (e.g., 'Valencia Orange Cold-Pressed Juice') or supply product context.",
                     status="unresolved"
                 ))
@@ -546,7 +674,7 @@ class GovernanceEngine:
                                         explanation=f"Caption states '{conflict_c.group(1)}', which contradicts approved specification: '{fact.fact_value}'.",
                                         text_excerpt=self._extract_excerpt(body_text, conflict_c.start(), conflict_c.end()),
                                         matched_fact_id=fact.id,
-                                        source_citation=fact.source_citation or f"freshsip_products.csv ({target_sku})",
+                                        source_citation=fact.source_citation or f"{brand_name} Product Catalogue ({target_sku})",
                                         recommended_action=f"Update caption copy to align with verified fact: '{fact.fact_value}'.",
                                         status="unresolved"
                                     ))
@@ -563,7 +691,7 @@ class GovernanceEngine:
                                         explanation=f"Poster artwork states '{conflict_p.group(1)}', which contradicts approved specification: '{fact.fact_value}'.",
                                         text_excerpt=f"Poster: '{region_info[0] if region_info else conflict_p.group(1)}'{bbox_str}",
                                         matched_fact_id=fact.id,
-                                        source_citation=fact.source_citation or f"freshsip_products.csv ({target_sku})",
+                                        source_citation=fact.source_citation or f"{brand_name} Product Catalogue ({target_sku})",
                                         recommended_action=f"Correct poster artwork to match verified fact: '{fact.fact_value}'.",
                                         status="unresolved"
                                     ))
@@ -584,7 +712,7 @@ class GovernanceEngine:
                                         explanation=f"Content states '{mentioned_cals} calories', but approved specification states '{fact.fact_value}'.",
                                         text_excerpt=cals_match.group(0),
                                         matched_fact_id=fact.id,
-                                        source_citation=fact.source_citation or f"freshsip_products.csv ({target_sku})",
+                                        source_citation=fact.source_citation or f"{brand_name} Product Catalogue ({target_sku})",
                                         recommended_action=f"Verify calorie count against approved record: '{fact.fact_value}'.",
                                         status="unresolved"
                                     ))
@@ -619,7 +747,7 @@ class GovernanceEngine:
                                         explanation=f"Caption states '₹{mentioned_price}', but approved catalogue MRP is '{fact.fact_value}'.",
                                         text_excerpt=self._extract_excerpt(body_text, price_match_c.start(), price_match_c.end()),
                                         matched_fact_id=fact.id,
-                                        source_citation=fact.source_citation or f"freshsip_products.csv ({target_sku})",
+                                        source_citation=fact.source_citation or f"{brand_name} Product Catalogue ({target_sku})",
                                         recommended_action=f"Correct price in caption to match approved catalogue MRP: '{fact.fact_value}'.",
                                         status="unresolved"
                                     ))
@@ -639,7 +767,7 @@ class GovernanceEngine:
                                         explanation=f"Poster states '{price_match_p.group(0)}', but approved catalogue MRP is '{fact.fact_value}'.",
                                         text_excerpt=f"Poster: '{region_info[0] if region_info else price_match_p.group(0)}'{bbox_str}",
                                         matched_fact_id=fact.id,
-                                        source_citation=fact.source_citation or f"freshsip_products.csv ({target_sku})",
+                                        source_citation=fact.source_citation or f"{brand_name} Product Catalogue ({target_sku})",
                                         recommended_action=f"Correct price on poster artwork to match approved catalogue MRP: '{fact.fact_value}'.",
                                         status="unresolved"
                                     ))
@@ -669,7 +797,7 @@ class GovernanceEngine:
                             explanation=f"Claim '{unapp_fact.fact_value}' detected in {loc} is currently PENDING REVIEW by the Knowledge Reviewer. Under FR-RULE-018, unapproved claims must be escalated to human governance.",
                             text_excerpt=excerpt,
                             matched_fact_id=unapp_fact.id,
-                            source_citation=unapp_fact.source_citation or "freshsip_approved_claims.csv",
+                            source_citation=unapp_fact.source_citation or f"{brand_name} Claims Register",
                             recommended_action="Hold draft for human review. Escalate to Brand Governance Manager.",
                             status="unresolved"
                         ))
@@ -681,7 +809,7 @@ class GovernanceEngine:
                             explanation=f"Claim '{unapp_fact.fact_value}' detected in {loc} expired on {unapp_fact.valid_until.strftime('%Y-%m-%d') if unapp_fact.valid_until else 'prior date'}. Under FR-RULE-018, expired claims require revalidation.",
                             text_excerpt=excerpt,
                             matched_fact_id=unapp_fact.id,
-                            source_citation=unapp_fact.source_citation or "freshsip_approved_claims.csv",
+                            source_citation=unapp_fact.source_citation or f"{brand_name} Claims Register",
                             recommended_action="Revalidate claim with Brand Governance Lead before reuse.",
                             status="unresolved"
                         ))
@@ -693,7 +821,7 @@ class GovernanceEngine:
                             explanation=f"Claim '{unapp_fact.fact_value}' detected in {loc} was permanently REJECTED during brand governance review.",
                             text_excerpt=excerpt,
                             matched_fact_id=unapp_fact.id,
-                            source_citation=unapp_fact.source_citation or "freshsip_approved_claims.csv",
+                            source_citation=unapp_fact.source_citation or f"{brand_name} Claims Register",
                             recommended_action="Remove permanently rejected claim immediately.",
                             status="unresolved"
                         ))
@@ -726,7 +854,7 @@ class GovernanceEngine:
                     text_excerpt=match_sample.group(0),
                     matched_rule_id=None,
                     matched_fact_id=None,
-                    source_citation="freshsip_brand_guidelines.pdf, Section D, p. 3",
+                    source_citation=f"{brand_name} Brand Guidelines, Section D, p. 3",
                     recommended_action="Ensure copy continues to clearly negate medical claims.",
                     status="passed_check"
                 ))
@@ -785,6 +913,9 @@ class GovernanceEngine:
 
         # Create GovernanceRun record
         gov_run = GovernanceRun(
+            organization_id=org_id,
+            knowledge_base_version_id=kb_version_id,
+            baseline_status=baseline_status,
             content_version_id=content_version.id,
             executed_by=executed_by_user_id,
             overall_status=overall_status,
@@ -828,6 +959,22 @@ class GovernanceEngine:
         Evaluates each page locally, maps findings to specific page numbers, checks
         document-level disclosures, and persists an immutable GovernanceRun.
         """
+        active_kb = db.query(OrganizationActiveKnowledgeBase).filter(
+            OrganizationActiveKnowledgeBase.organization_id == org_id
+        ).first() if org_id else None
+        kb_version_id = active_kb.active_version_id if active_kb else None
+        baseline_status = "versioned" if kb_version_id else "legacy_unversioned"
+
+        brand_profile = db.query(BrandProfile).filter(
+            BrandProfile.organization_id == org_id
+        ).first() if org_id else None
+        brand_name = brand_profile.brand_name if brand_profile else "Brand"
+
+        org_products = db.query(Product).filter(
+            Product.organization_id == org_id,
+            Product.record_status == "Active"
+        ).all() if org_id else []
+
         approved_rules = db.query(KnowledgeRule).filter(
             KnowledgeRule.organization_id == org_id,
             KnowledgeRule.status == "approved"
@@ -886,6 +1033,9 @@ class GovernanceEngine:
             overall_status = "passed"
 
         gov_run = GovernanceRun(
+            organization_id=org_id,
+            knowledge_base_version_id=kb_version_id,
+            baseline_status=baseline_status,
             content_version_id=content_version.id,
             executed_by=executed_by_user_id,
             overall_status=overall_status,
@@ -1037,9 +1187,15 @@ class GovernanceEngine:
                     continue
 
                 rules_eval_count += 1
-                sub_patterns = [p.strip() for p in rule.pattern.split(",") if p.strip()] if "," in rule.pattern else [rule.pattern.strip()]
+                if "|" in rule.pattern:
+                    sub_patterns = [p.strip() for p in rule.pattern.split("|") if p.strip()]
+                elif "," in rule.pattern:
+                    sub_patterns = [p.strip() for p in rule.pattern.split(",") if p.strip()]
+                else:
+                    sub_patterns = [rule.pattern.strip()]
                 for pat in sub_patterns:
-                    pat_escaped = re.escape(pat)
+                    clean_pat = pat.replace(r"\.", ".").strip()
+                    pat_escaped = re.escape(clean_pat)
                     regex = re.compile(rf"\b{pat_escaped}\b", re.IGNORECASE)
                     match_p = regex.search(page_text)
                     if not match_p:
@@ -1056,7 +1212,7 @@ class GovernanceEngine:
                             explanation=f"[Page {page_num}] Phrase '{pat}' appeared in a qualifying or negated context. Rule: {rule.title}.",
                             text_excerpt=f"[Page {page_num}] {pat}",
                             matched_rule_id=rule.id,
-                            source_citation=rule.source_citation or "freshsip_brand_guidelines.pdf",
+                            source_citation=rule.source_citation or f"{brand_name} Brand Guidelines",
                             recommended_action="No action required if used strictly to clarify or negate unverified claims.",
                             status="passed_check",
                             page_number=page_num
@@ -1072,7 +1228,7 @@ class GovernanceEngine:
                             explanation=f"[Page {page_num}] Content on page contains prohibited language '{pat}'. Rule: {rule.title}. Reason: {rule.explanation}",
                             text_excerpt=f"[Page {page_num}] '{p_text}'{bbox_str}",
                             matched_rule_id=rule.id,
-                            source_citation=rule.source_citation or "freshsip_brand_guidelines.pdf",
+                            source_citation=rule.source_citation or f"{brand_name} Brand Guidelines",
                             recommended_action=f"Remove or replace copy containing '{pat}' on Page {page_num}. Action: {rule.enforcement_action or 'block'}.",
                             status="unresolved",
                             page_number=page_num
@@ -1096,7 +1252,7 @@ class GovernanceEngine:
                                     explanation=f"[Page {page_num}] Page states '{conflict_p.group(1)}', which contradicts approved specification: '{fact.fact_value}'.",
                                     text_excerpt=f"[Page {page_num}] '{reg[0] if reg else conflict_p.group(1)}'{bbox_str}",
                                     matched_fact_id=fact.id,
-                                    source_citation=fact.source_citation or f"freshsip_products.csv ({target_sku})",
+                                    source_citation=fact.source_citation or f"{brand_name} Product Catalogue ({target_sku})",
                                     recommended_action=f"Correct copy on Page {page_num} to match verified fact: '{fact.fact_value}'.",
                                     status="unresolved",
                                     page_number=page_num
@@ -1113,7 +1269,7 @@ class GovernanceEngine:
                                     explanation=f"[Page {page_num}] Page states '{mentioned_cals} calories', but approved specification states '{fact.fact_value}'.",
                                     text_excerpt=f"[Page {page_num}] {cals_match.group(0)}",
                                     matched_fact_id=fact.id,
-                                    source_citation=fact.source_citation or f"freshsip_products.csv ({target_sku})",
+                                    source_citation=fact.source_citation or f"{brand_name} Product Catalogue ({target_sku})",
                                     recommended_action=f"Verify calorie count on Page {page_num} against approved record: '{fact.fact_value}'.",
                                     status="unresolved",
                                     page_number=page_num
@@ -1141,7 +1297,7 @@ class GovernanceEngine:
                                     explanation=f"[Page {page_num}] Page states '{price_match_p.group(0)}', but approved catalogue MRP is '{fact.fact_value}'.",
                                     text_excerpt=f"[Page {page_num}] '{reg[0] if reg else price_match_p.group(0)}'{bbox_str}",
                                     matched_fact_id=fact.id,
-                                    source_citation=fact.source_citation or f"freshsip_products.csv ({target_sku})",
+                                    source_citation=fact.source_citation or f"{brand_name} Product Catalogue ({target_sku})",
                                     recommended_action=f"Correct price on Page {page_num} to match approved catalogue MRP: '{fact.fact_value}'.",
                                     status="unresolved",
                                     page_number=page_num
@@ -1162,7 +1318,7 @@ class GovernanceEngine:
                                 explanation=f"[Page {page_num}] Claim '{unapp_fact.fact_value}' detected on Page {page_num} is currently PENDING REVIEW by the Knowledge Reviewer. Under FR-RULE-018, unapproved claims must be escalated to human governance.",
                                 text_excerpt=excerpt,
                                 matched_fact_id=unapp_fact.id,
-                                source_citation=unapp_fact.source_citation or "freshsip_approved_claims.csv",
+                                source_citation=unapp_fact.source_citation or f"{brand_name} Claims Register",
                                 recommended_action="Hold draft for human review. Escalate to Brand Governance Manager.",
                                 status="unresolved",
                                 page_number=page_num
@@ -1175,7 +1331,7 @@ class GovernanceEngine:
                                 explanation=f"[Page {page_num}] Claim '{unapp_fact.fact_value}' detected on Page {page_num} expired on {unapp_fact.valid_until.strftime('%Y-%m-%d') if unapp_fact.valid_until else 'prior date'}. Under FR-RULE-018, expired claims require revalidation.",
                                 text_excerpt=excerpt,
                                 matched_fact_id=unapp_fact.id,
-                                source_citation=unapp_fact.source_citation or "freshsip_approved_claims.csv",
+                                source_citation=unapp_fact.source_citation or f"{brand_name} Claims Register",
                                 recommended_action="Revalidate claim with Brand Governance Lead before reuse.",
                                 status="unresolved",
                                 page_number=page_num
@@ -1188,7 +1344,7 @@ class GovernanceEngine:
                                 explanation=f"[Page {page_num}] Claim '{unapp_fact.fact_value}' detected on Page {page_num} was permanently REJECTED during brand governance review.",
                                 text_excerpt=excerpt,
                                 matched_fact_id=unapp_fact.id,
-                                source_citation=unapp_fact.source_citation or "freshsip_approved_claims.csv",
+                                source_citation=unapp_fact.source_citation or f"{brand_name} Claims Register",
                                 recommended_action="Remove permanently rejected claim immediately.",
                                 status="unresolved",
                                 page_number=page_num
@@ -1206,7 +1362,7 @@ class GovernanceEngine:
                             title=f"[Page {page_num}] Contextual Health Mention Noted: {title_desc}",
                             explanation=f"[Page {page_num}] Medical claim phrase '{match_p.group(0)}' detected in negated/editorial context. Verified compliant under editorial exception.",
                             text_excerpt=match_p.group(0),
-                            source_citation="freshsip_brand_guidelines.pdf, Section D, p. 3",
+                            source_citation=f"{brand_name} Brand Guidelines, Section D, p. 3",
                             recommended_action="Ensure copy continues to clearly negate medical claims.",
                             status="passed_check",
                             page_number=page_num
@@ -1274,7 +1430,7 @@ class GovernanceEngine:
                             explanation="Garden Tomato Celery Press (FS-PROD-003) must disclose 'Contains Celery (14%)' on product descriptions, packaging, and listings. Checked across all PDF pages and caption copy.",
                             text_excerpt=None,
                             matched_rule_id=rule.id,
-                            source_citation=rule.source_citation or "freshsip_brand_guidelines.pdf, Section E, p. 5",
+                            source_citation=rule.source_citation or f"{brand_name} Brand Guidelines, Section E, p. 5",
                             recommended_action="Add mandatory allergen statement: 'Contains Celery (14%)' in creative or caption.",
                             status="unresolved",
                             page_number=None
@@ -1288,7 +1444,7 @@ class GovernanceEngine:
                             explanation="Spiced Carrot Beetroot Press (FS-PROD-004) has allergen status marked 'not_provided'. Claiming allergen-free violates brand guidelines.",
                             text_excerpt=None,
                             matched_rule_id=rule.id,
-                            source_citation=rule.source_citation or "freshsip_brand_guidelines.pdf, Section E, p. 5",
+                            source_citation=rule.source_citation or f"{brand_name} Brand Guidelines, Section E, p. 5",
                             recommended_action="Remove allergen-free claim or upload certified allergen cross-contact test results.",
                             status="unresolved",
                             page_number=None
@@ -1304,7 +1460,7 @@ class GovernanceEngine:
                             explanation="When describing sugar content in fruit/vegetable juices, approved policy requires stating 'No Added Sugar' rather than 'Zero Sugar' (checked across caption and all PDF pages).",
                             text_excerpt=None,
                             matched_rule_id=rule.id,
-                            source_citation=rule.source_citation or "freshsip_brand_guidelines.pdf, Section C, p. 3",
+                            source_citation=rule.source_citation or f"{brand_name} Brand Guidelines, Section C, p. 3",
                             recommended_action="Use 'No Added Sugar' and acknowledge naturally occurring fruit sugars.",
                             status="unresolved",
                             page_number=None
@@ -1322,7 +1478,7 @@ class GovernanceEngine:
                             explanation=f"Required brand tagline '{rule.pattern}' was not found in campaign copy or any PDF page.",
                             text_excerpt=None,
                             matched_rule_id=rule.id,
-                            source_citation=rule.source_citation or "freshsip_brand_guidelines.pdf",
+                            source_citation=rule.source_citation or f"{brand_name} Brand Guidelines",
                             recommended_action=f"Add approved brand tagline: '{rule.pattern}'.",
                             status="unresolved",
                             page_number=None
@@ -1349,9 +1505,15 @@ class GovernanceEngine:
             if not self.is_rule_in_channel_scope(rule.scope, channel):
                 continue
 
-            sub_patterns = [p.strip() for p in rule.pattern.split(",") if p.strip()] if "," in rule.pattern else [rule.pattern.strip()]
+            if "|" in rule.pattern:
+                sub_patterns = [p.strip() for p in rule.pattern.split("|") if p.strip()]
+            elif "," in rule.pattern:
+                sub_patterns = [p.strip() for p in rule.pattern.split(",") if p.strip()]
+            else:
+                sub_patterns = [rule.pattern.strip()]
             for pat in sub_patterns:
-                pat_escaped = re.escape(pat)
+                clean_pat = pat.replace(r"\.", ".").strip()
+                pat_escaped = re.escape(clean_pat)
                 regex = re.compile(rf"\b{pat_escaped}\b", re.IGNORECASE)
                 m = regex.search(body_text)
                 if not m:
@@ -1367,7 +1529,7 @@ class GovernanceEngine:
                         explanation=f"Phrase '{pat}' appeared in a qualifying or negated context in caption copy. Rule: {rule.title}.",
                         text_excerpt=self._extract_excerpt(body_text, m.start(), m.end()),
                         matched_rule_id=rule.id,
-                        source_citation=rule.source_citation or "freshsip_brand_guidelines.pdf",
+                        source_citation=rule.source_citation or f"{brand_name} Brand Guidelines",
                         recommended_action="No action required if used strictly to clarify or negate unverified claims.",
                         status="passed_check",
                         page_number=None
@@ -1380,7 +1542,7 @@ class GovernanceEngine:
                         explanation=f"Caption copy contains prohibited language '{pat}'. Rule: {rule.title}. Reason: {rule.explanation}",
                         text_excerpt=self._extract_excerpt(body_text, m.start(), m.end()),
                         matched_rule_id=rule.id,
-                        source_citation=rule.source_citation or "freshsip_brand_guidelines.pdf",
+                        source_citation=rule.source_citation or f"{brand_name} Brand Guidelines",
                         recommended_action=f"Remove or rephrase '{pat}' from caption copy. Action: {rule.enforcement_action or 'block'}.",
                         status="unresolved",
                         page_number=None
@@ -1397,7 +1559,7 @@ class GovernanceEngine:
                         title=f"Contextual Health Mention Noted: {title_desc}",
                         explanation=f"Medical claim phrase '{match_c.group(0)}' detected in negated/editorial context in caption. Verified compliant under editorial exception.",
                         text_excerpt=match_c.group(0),
-                        source_citation="freshsip_brand_guidelines.pdf, Section D, p. 3",
+                        source_citation=f"{brand_name} Brand Guidelines, Section D, p. 3",
                         recommended_action="Ensure copy continues to clearly negate medical claims.",
                         status="passed_check",
                         page_number=None

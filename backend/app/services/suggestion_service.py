@@ -7,6 +7,9 @@ from sqlalchemy.orm import Session
 from app.models.content import ContentItem, ContentVersion, GovernanceRun, GovernanceFinding, CorrectionSuggestion
 from app.models.knowledge import KnowledgeRule, KnowledgeFact
 from app.models.organization import User
+from app.models.product import Product
+from app.models.claim import Claim, RequiredDisclosure
+from app.models.brand import BrandProfile
 
 # Canonical product metadata mapping
 CANONICAL_PRODUCT_METADATA: Dict[str, Dict[str, Any]] = {
@@ -82,9 +85,28 @@ class SuggestionService:
             return ""
         return f"- {original}\n+ {proposed}"
 
-    def detect_sku_from_text(self, text: str, title: str) -> Optional[str]:
-        """Identify which SKU is referenced in the copy or title."""
+    def detect_sku_from_text(self, text: str, title: str, org_id: Optional[str] = None, db: Optional[Session] = None) -> Optional[str]:
+        """Identify which SKU is referenced in the copy or title dynamically from DB or fallback."""
         combined = f"{title} {text}".lower()
+        if db and org_id:
+            try:
+                products = db.query(Product).filter(
+                    Product.organization_id == org_id,
+                    Product.record_status == "Active"
+                ).all()
+                for p in products:
+                    aliases = [p.product_id.lower()]
+                    if p.product_name:
+                        aliases.append(p.product_name.lower())
+                    if p.variant_name:
+                        aliases.append(p.variant_name.lower())
+                    if p.sku:
+                        aliases.append(p.sku.lower())
+                    if any(re.search(rf"\b{re.escape(alias)}\b", combined) for alias in aliases):
+                        return p.product_id
+            except Exception:
+                pass
+
         if any(k in combined for k in ["fs-prod-001", "valencia orange"]):
             return "FS-PROD-001"
         if any(k in combined for k in ["fs-prod-002", "pink guava", "pomegranate nectar"]):
@@ -112,7 +134,7 @@ class SuggestionService:
         if not item:
             return []
 
-        detected_sku = self.detect_sku_from_text(version.body_text or "", item.title or "")
+        detected_sku = self.detect_sku_from_text(version.body_text or "", item.title or "", org_id=item.organization_id, db=db)
         suggestions: List[CorrectionSuggestion] = []
 
         findings = db.query(GovernanceFinding).filter(
@@ -150,6 +172,9 @@ class SuggestionService:
         detected_sku: Optional[str]
     ) -> Optional[CorrectionSuggestion]:
         """Route finding to appropriate category generator."""
+        org_id = item.organization_id
+        brand_profile = db.query(BrandProfile).filter(BrandProfile.organization_id == org_id).first() if org_id else None
+        brand_name = brand_profile.brand_name if brand_profile else "Freshsip"
         # 1. Determine target type
         if finding.page_number is not None:
             target_type = "pdf_page"
@@ -173,52 +198,52 @@ class SuggestionService:
         # Category A: Terminology and Prohibited Wording
         # -------------------------------------------------------------
         if rule_code == "FR-RULE-005" or "sugar-free" in (finding.title or "").lower() or "zero sugar" in (finding.title or "").lower():
-            return self._build_sugar_terminology_suggestion(finding, version, item, target_type, rule, detected_sku)
+            return self._build_sugar_terminology_suggestion(finding, version, item, target_type, rule, detected_sku, brand_name, db)
 
         if rule_code == "FR-RULE-004" or "miracle" in (finding.title or "").lower() or "magic" in (finding.title or "").lower():
-            return self._build_miracle_terminology_suggestion(finding, version, item, target_type, rule)
+            return self._build_miracle_terminology_suggestion(finding, version, item, target_type, rule, brand_name, db)
 
         if rule_code == "FR-RULE-006" or "raw" in (finding.title or "").lower() or "unprocessed" in (finding.title or "").lower():
-            return self._build_processing_terminology_suggestion(finding, version, item, target_type, rule, detected_sku)
+            return self._build_processing_terminology_suggestion(finding, version, item, target_type, rule, detected_sku, brand_name, db)
 
-        if rule_code == "FR-RULE-001" or "naming" in (finding.title or "").lower() or "pvt. ltd." in (finding.text_excerpt or "").lower():
-            return self._build_naming_suggestion(finding, version, item, target_type, rule)
+        if rule_code == "FR-RULE-001" or "naming" in (finding.title or "").lower() or "suffix" in (finding.title or "").lower() or (rule and any(k in (rule.title or "").lower() for k in ["suffix", "corporate", "naming"])):
+            return self._build_naming_suggestion(finding, version, item, target_type, rule, brand_name, db)
 
         if rule_code == "FR-RULE-010" or "organic" in (finding.title or "").lower() or "natural" in (finding.title or "").lower() or "chemical-free" in (finding.title or "").lower():
-            return self._build_natural_organic_suggestion(finding, version, item, target_type, rule, detected_sku)
+            return self._build_natural_organic_suggestion(finding, version, item, target_type, rule, detected_sku, brand_name, db)
 
         if rule_code == "FR-RULE-011" or "superlative" in (finding.title or "").lower() or "india's #" in (finding.text_excerpt or "").lower():
-            return self._build_superlative_suggestion(finding, version, item, target_type, rule)
+            return self._build_superlative_suggestion(finding, version, item, target_type, rule, brand_name, db)
 
         # -------------------------------------------------------------
         # Category B: Promotional Claims & Product Facts
         # -------------------------------------------------------------
         if rule_code == "FR-RULE-015" or finding.category == "product_fact_mismatch" or "mrp" in (finding.title or "").lower() or "price" in (finding.title or "").lower():
-            return self._build_price_or_fact_suggestion(finding, version, item, target_type, rule, fact, detected_sku)
+            return self._build_price_or_fact_suggestion(finding, version, item, target_type, rule, fact, detected_sku, brand_name, db)
 
         if rule_code == "FR-RULE-016" or "discount" in (finding.title or "").lower() or "flash sale" in (finding.title or "").lower():
-            return self._build_discount_suggestion(finding, version, item, target_type, rule)
+            return self._build_discount_suggestion(finding, version, item, target_type, rule, brand_name, db)
 
         if rule_code in ("FR-RULE-007", "FR-RULE-008", "FR-RULE-018") or finding.category in ("unsupported_claim", "claim_status_issue"):
-            return self._build_claim_suggestion(finding, version, item, target_type, rule, fact, detected_sku)
+            return self._build_claim_suggestion(finding, version, item, target_type, rule, fact, detected_sku, brand_name, db)
 
         # -------------------------------------------------------------
         # Category C: Mandatory Disclosures
         # -------------------------------------------------------------
         if rule_code == "FR-RULE-014" or finding.category == "mandatory_wording_missing":
-            return self._build_disclosure_suggestion(finding, version, item, target_type, rule, detected_sku)
+            return self._build_disclosure_suggestion(finding, version, item, target_type, rule, detected_sku, brand_name, db)
 
         # -------------------------------------------------------------
         # Category D: Tone and Voice
         # -------------------------------------------------------------
         if rule_code == "FR-RULE-002" or "fear-based" in (finding.title or "").lower() or "tone" in (finding.title or "").lower():
-            return self._build_tone_suggestion(finding, version, item, target_type, rule)
+            return self._build_tone_suggestion(finding, version, item, target_type, rule, brand_name, db)
 
         # -------------------------------------------------------------
         # Category E: Visual, Contrast, and Accessibility
         # -------------------------------------------------------------
         if finding.category in ("image_guideline_issue", "contrast", "dimensions", "colour", "logo", "accessibility", "layout") or target_type in ("poster_image", "pdf_page"):
-            return self._build_visual_suggestion(finding, version, item, target_type, rule, detected_sku)
+            return self._build_visual_suggestion(finding, version, item, target_type, rule, detected_sku, brand_name, db)
 
         # Fallback manual guidance
         return CorrectionSuggestion(
@@ -253,7 +278,9 @@ class SuggestionService:
         item: ContentItem,
         target_type: str,
         rule: Optional[KnowledgeRule],
-        sku: Optional[str]
+        sku: Optional[str],
+        brand_name: str = "Freshsip",
+        db: Optional[Session] = None
     ) -> CorrectionSuggestion:
         meta = CANONICAL_PRODUCT_METADATA.get(sku or "", {})
         sugar_type = meta.get("sugar_type", "fruit")
@@ -284,7 +311,7 @@ class SuggestionService:
                     proposed_text=approved_phrase,
                     diff_preview=diff,
                     explanation="Replaces prohibited 'sugar-free'/'zero sugar' phrase with approved 'no added sugar' terminology acknowledging naturally occurring sugars (FR-RULE-005).",
-                    evidence_source="freshsip_brand_guidelines.pdf, Section C: Terminology Rules",
+                    evidence_source=f"{brand_name} Brand Guidelines, Section C: Terminology Rules",
                     correction_type="deterministic_replacement",
                     confidence="high",
                     can_auto_apply=True,
@@ -306,7 +333,7 @@ class SuggestionService:
             proposed_text=f"Replace '{cleaned_orig}' with 'No added sugar' in artwork layout.",
             diff_preview=f"- {cleaned_orig}\n+ No added sugar (per specification)",
             explanation=f"Prohibited sugar terminology detected {page_str}. Flattened creative artwork cannot be modified directly via text replacement. Update copy in design file and re-upload.",
-            evidence_source="freshsip_brand_guidelines.pdf, Section C: Terminology Rules",
+            evidence_source=f"{brand_name} Brand Guidelines, Section C: Terminology Rules",
             correction_type="manual_guidance",
             confidence="high",
             can_auto_apply=False,
@@ -319,7 +346,9 @@ class SuggestionService:
         version: ContentVersion,
         item: ContentItem,
         target_type: str,
-        rule: Optional[KnowledgeRule]
+        rule: Optional[KnowledgeRule],
+        brand_name: str = "Freshsip",
+        db: Optional[Session] = None
     ) -> CorrectionSuggestion:
         original_excerpt = finding.text_excerpt or "miracle juice"
         cleaned_orig = re.sub(r"^\[Page \d+\]\s*", "", original_excerpt).strip("'\" ")
@@ -345,7 +374,7 @@ class SuggestionService:
                     proposed_text=replacement,
                     diff_preview=diff,
                     explanation="Removes sensationalist terminology attributing supernatural properties, replacing with factual beverage phrasing (FR-RULE-004).",
-                    evidence_source="freshsip_brand_guidelines.pdf, Section C: Terminology Rules",
+                    evidence_source=f"{brand_name} Brand Guidelines, Section C: Terminology Rules",
                     correction_type="deterministic_replacement",
                     confidence="high",
                     can_auto_apply=True,
@@ -365,7 +394,7 @@ class SuggestionService:
             proposed_text="Remove miraculous/medicinal adjectives in creative layout.",
             diff_preview=f"- {cleaned_orig}\n+ Refreshing blend",
             explanation="Avoid describing beverages with sensationalist adjectives like miracle or magic. Update artwork in authoring tool.",
-            evidence_source="freshsip_brand_guidelines.pdf, Section C: Terminology Rules",
+            evidence_source=f"{brand_name} Brand Guidelines, Section C: Terminology Rules",
             correction_type="manual_guidance",
             confidence="high",
             can_auto_apply=False,
@@ -379,7 +408,9 @@ class SuggestionService:
         item: ContentItem,
         target_type: str,
         rule: Optional[KnowledgeRule],
-        sku: Optional[str]
+        sku: Optional[str],
+        brand_name: str = "Freshsip",
+        db: Optional[Session] = None
     ) -> CorrectionSuggestion:
         meta = CANONICAL_PRODUCT_METADATA.get(sku or "", {})
         approved_processing = meta.get("processing", "High-Pressure Processed (HPP)")
@@ -407,7 +438,7 @@ class SuggestionService:
                     proposed_text=approved_processing,
                     diff_preview=diff,
                     explanation=f"Replaces inaccurate raw/unprocessed terminology with approved processing method '{approved_processing}' (FR-RULE-006).",
-                    evidence_source="freshsip_brand_guidelines.pdf, Section C: Terminology Rules",
+                    evidence_source=f"{brand_name} Brand Guidelines, Section C: Terminology Rules",
                     correction_type="deterministic_replacement",
                     confidence="high",
                     can_auto_apply=True,
@@ -426,8 +457,8 @@ class SuggestionService:
             original_text=cleaned_orig,
             proposed_text=f"Replace '{cleaned_orig}' with '{approved_processing}' in artwork layout.",
             diff_preview=f"- {cleaned_orig}\n+ {approved_processing}",
-            explanation=f"All packaged Freshsip beverages undergo processing ({approved_processing}). Revise design file and re-upload.",
-            evidence_source="freshsip_brand_guidelines.pdf, Section C: Terminology Rules",
+            explanation=f"All packaged {brand_name} beverages undergo processing ({approved_processing}). Revise design file and re-upload.",
+            evidence_source=f"{brand_name} Brand Guidelines, Section C: Terminology Rules",
             correction_type="manual_guidance",
             confidence="high",
             can_auto_apply=False,
@@ -440,16 +471,21 @@ class SuggestionService:
         version: ContentVersion,
         item: ContentItem,
         target_type: str,
-        rule: Optional[KnowledgeRule]
+        rule: Optional[KnowledgeRule],
+        brand_name: str = "Freshsip",
+        db: Optional[Session] = None
     ) -> CorrectionSuggestion:
-        original_excerpt = finding.text_excerpt or "Freshsip Organic Pvt. Ltd."
+        original_excerpt = finding.text_excerpt or f"{brand_name} Organic Pvt. Ltd."
         cleaned_orig = re.sub(r"^\[Page \d+\]\s*", "", original_excerpt).strip("'\" ")
-        replacement = "Freshsip Beverages"
+        replacement = f"{brand_name} Beverages" if brand_name == "Freshsip" else brand_name
 
         if target_type == "body_text":
             body = version.body_text or ""
-            pattern = re.compile(r"\bFreshsip(?:\s+Organic)?(?:\s+Pvt\.?\s*Ltd\.?)\b", re.IGNORECASE)
+            pattern = re.compile(rf"\b{re.escape(brand_name)}(?:\s+\w+)?(?:\s+Pvt\.?\s*Ltd\.?|\s+Enterprises|\s+Inc\.?|\s+Co\.?)\b", re.IGNORECASE)
             m = pattern.search(body)
+            if not m and finding.text_excerpt:
+                clean_exc = re.escape(finding.text_excerpt.strip("'\" "))
+                m = re.search(rf"\b(?:{re.escape(brand_name)}\s+)?{clean_exc}\b", body, re.IGNORECASE)
             if m:
                 matched_str = m.group(0)
                 diff = self.generate_diff_preview(matched_str, replacement)
@@ -461,12 +497,12 @@ class SuggestionService:
                     target_type="body_text",
                     page_number=None,
                     rule_id=rule.id if rule else None,
-                    rule_code="FR-RULE-001",
+                    rule_code=rule.rule_code if rule else "FR-RULE-001",
                     original_text=matched_str,
                     proposed_text=replacement,
                     diff_preview=diff,
-                    explanation="Aligns brand name with approved corporate identity 'Freshsip Beverages' without fabricated corporate registration suffixes (FR-RULE-001).",
-                    evidence_source="freshsip_brand_guidelines.pdf, Section A: Brand Identity",
+                    explanation=f"Aligns brand name with approved corporate identity '{replacement}' without fabricated corporate registration suffixes ({rule.rule_code if rule else 'FR-RULE-001'}).",
+                    evidence_source=f"{brand_name} Brand Guidelines, Section A: Brand Identity",
                     correction_type="deterministic_replacement",
                     confidence="high",
                     can_auto_apply=True,
@@ -483,10 +519,10 @@ class SuggestionService:
             rule_id=rule.id if rule else None,
             rule_code="FR-RULE-001",
             original_text=cleaned_orig,
-            proposed_text="Replace corporate suffix with 'Freshsip Beverages'.",
-            diff_preview=f"- {cleaned_orig}\n+ Freshsip Beverages",
+            proposed_text=f"Replace corporate suffix with '{replacement}'.",
+            diff_preview=f"- {cleaned_orig}\n+ {replacement}",
             explanation="Use canonical brand naming in creative artwork. Revise layout in authoring software.",
-            evidence_source="freshsip_brand_guidelines.pdf, Section A: Brand Identity",
+            evidence_source=f"{brand_name} Brand Guidelines, Section A: Brand Identity",
             correction_type="manual_guidance",
             confidence="high",
             can_auto_apply=False,
@@ -500,7 +536,9 @@ class SuggestionService:
         item: ContentItem,
         target_type: str,
         rule: Optional[KnowledgeRule],
-        sku: Optional[str]
+        sku: Optional[str],
+        brand_name: str = "Freshsip",
+        db: Optional[Session] = None
     ) -> CorrectionSuggestion:
         replacement = "no added preservatives (per internal synthetic specification)"
         original_excerpt = finding.text_excerpt or "100% natural"
@@ -526,7 +564,7 @@ class SuggestionService:
                     proposed_text=replacement,
                     diff_preview=diff,
                     explanation="Removes unsupported organic/chemical-free claims and substitutes approved preservative status (FR-RULE-010).",
-                    evidence_source="freshsip_brand_guidelines.pdf, Section D: Messaging and Claims",
+                    evidence_source=f"{brand_name} Brand Guidelines, Section D: Messaging and Claims",
                     correction_type="deterministic_replacement",
                     confidence="high",
                     can_auto_apply=True,
@@ -545,8 +583,8 @@ class SuggestionService:
             original_text=cleaned_orig,
             proposed_text="Remove uncertified organic/natural claims in creative artwork.",
             diff_preview=f"- {cleaned_orig}\n+ No added preservatives",
-            explanation="Freshsip holds no organic or chemical-free certifications. Update artwork in authoring tool.",
-            evidence_source="freshsip_brand_guidelines.pdf, Section D: Messaging and Claims",
+            explanation=f"{brand_name} holds no organic or chemical-free certifications. Update artwork in authoring tool.",
+            evidence_source=f"{brand_name} Brand Guidelines, Section D: Messaging and Claims",
             correction_type="manual_guidance",
             confidence="high",
             can_auto_apply=False,
@@ -559,7 +597,9 @@ class SuggestionService:
         version: ContentVersion,
         item: ContentItem,
         target_type: str,
-        rule: Optional[KnowledgeRule]
+        rule: Optional[KnowledgeRule],
+        brand_name: str = "Freshsip",
+        db: Optional[Session] = None
     ) -> CorrectionSuggestion:
         replacement = "crafted with transparent ingredient percentages and no added preservatives"
         original_excerpt = finding.text_excerpt or "India's #1"
@@ -585,7 +625,7 @@ class SuggestionService:
                     proposed_text=replacement,
                     diff_preview=diff,
                     explanation="Replaces unsubstantiated market-ranking superlative with factual formulation claim (FR-RULE-011).",
-                    evidence_source="freshsip_brand_guidelines.pdf, Section D: Messaging and Claims",
+                    evidence_source=f"{brand_name} Brand Guidelines, Section D: Messaging and Claims",
                     correction_type="deterministic_replacement",
                     confidence="high",
                     can_auto_apply=True,
@@ -605,7 +645,7 @@ class SuggestionService:
             proposed_text="Remove market-ranking superlatives from creative artwork.",
             diff_preview=f"- {cleaned_orig}\n+ Crafted with transparent ingredients",
             explanation="Unsubstantiated comparative superiority claims require independent market audit. Update artwork in design tool.",
-            evidence_source="freshsip_brand_guidelines.pdf, Section D: Messaging and Claims",
+            evidence_source=f"{brand_name} Brand Guidelines, Section D: Messaging and Claims",
             correction_type="manual_guidance",
             confidence="high",
             can_auto_apply=False,
@@ -620,7 +660,9 @@ class SuggestionService:
         target_type: str,
         rule: Optional[KnowledgeRule],
         fact: Optional[KnowledgeFact],
-        sku: Optional[str]
+        sku: Optional[str],
+        brand_name: str = "Freshsip",
+        db: Optional[Session] = None
     ) -> CorrectionSuggestion:
         meta = CANONICAL_PRODUCT_METADATA.get(sku or "", {})
         approved_mrp = meta.get("mrp", 120)
@@ -656,7 +698,7 @@ class SuggestionService:
                         proposed_text=approved_price_str,
                         diff_preview=diff,
                         explanation=f"Corrects promotional price to approved catalogue MRP ({approved_price_str}) for {meta.get('name', 'product')} (FR-RULE-015).",
-                        evidence_source=f"freshsip_products.csv (SKU: {sku or 'FS-PROD-001'}, MRP: {approved_price_str})",
+                        evidence_source=f"{brand_name} Product Catalogue (SKU: {sku or 'FS-PROD-001'}, MRP: {approved_price_str})",
                         correction_type="factual_correction",
                         confidence="high",
                         can_auto_apply=True,
@@ -678,7 +720,7 @@ class SuggestionService:
             proposed_text=f"Correct price display to approved MRP {approved_price_str} in artwork layout.",
             diff_preview=f"- {cleaned_orig}\n+ MRP {approved_price_str}",
             explanation=f"Advertised price in creative artwork does not match catalogue MRP ({approved_price_str}). Update artwork in design file and re-upload.",
-            evidence_source=f"freshsip_products.csv (SKU: {sku or 'FS-PROD-001'}, MRP: {approved_price_str})",
+            evidence_source=f"{brand_name} Product Catalogue (SKU: {sku or 'FS-PROD-001'}, MRP: {approved_price_str})",
             correction_type="manual_guidance",
             confidence="high",
             can_auto_apply=False,
@@ -691,7 +733,9 @@ class SuggestionService:
         version: ContentVersion,
         item: ContentItem,
         target_type: str,
-        rule: Optional[KnowledgeRule]
+        rule: Optional[KnowledgeRule],
+        brand_name: str = "Freshsip",
+        db: Optional[Session] = None
     ) -> CorrectionSuggestion:
         replacement = "Explore our 250 mL range, priced from ₹95 to ₹130 per bottle."
         original_excerpt = finding.text_excerpt or "50% OFF"
@@ -716,8 +760,8 @@ class SuggestionService:
                     original_text=matched_str,
                     proposed_text=replacement,
                     diff_preview=diff,
-                    explanation="Freshsip has no active discount promotion in the approved dataset. Replaces unapproved discount/scarcity claim with approved catalogue pricing range (FR-RULE-016).",
-                    evidence_source="freshsip_brand_guidelines.pdf, Section F: Product and Promotion Rules",
+                    explanation=f"{brand_name} has no active discount promotion in the approved dataset. Replaces unapproved discount/scarcity claim with approved catalogue pricing range (FR-RULE-016).",
+                    evidence_source=f"{brand_name} Brand Guidelines, Section F: Product and Promotion Rules",
                     correction_type="deterministic_replacement",
                     confidence="high",
                     can_auto_apply=True,
@@ -736,8 +780,8 @@ class SuggestionService:
             original_text=cleaned_orig,
             proposed_text="Remove discount badges and promo codes from creative artwork.",
             diff_preview=f"- {cleaned_orig}\n+ Standard catalogue pricing",
-            explanation="No promotional discount campaign is active for Freshsip. Update artwork in authoring tool.",
-            evidence_source="freshsip_brand_guidelines.pdf, Section F: Product and Promotion Rules",
+            explanation=f"No promotional discount campaign is active for {brand_name}. Update artwork in authoring tool.",
+            evidence_source=f"{brand_name} Brand Guidelines, Section F: Product and Promotion Rules",
             correction_type="manual_guidance",
             confidence="high",
             can_auto_apply=False,
@@ -752,7 +796,9 @@ class SuggestionService:
         target_type: str,
         rule: Optional[KnowledgeRule],
         fact: Optional[KnowledgeFact],
-        sku: Optional[str]
+        sku: Optional[str],
+        brand_name: str = "Freshsip",
+        db: Optional[Session] = None
     ) -> CorrectionSuggestion:
         original_excerpt = finding.text_excerpt or "Claim"
         cleaned_orig = re.sub(r"^\[Page \d+\]\s*", "", original_excerpt).strip("'\" ")
@@ -786,7 +832,7 @@ class SuggestionService:
                     proposed_text=approved_claim,
                     diff_preview=diff,
                     explanation=f"Replaces unverified claim with approved marketing claim '{approved_claim_code}' specifically established for {meta.get('name', 'product')}.",
-                    evidence_source=f"freshsip_approved_claims.csv (Claim ID: {approved_claim_code})",
+                    evidence_source=f"{brand_name} Claims Register (Claim ID: {approved_claim_code})",
                     correction_type="factual_correction",
                     confidence="high",
                     can_auto_apply=True,
@@ -823,7 +869,9 @@ class SuggestionService:
         item: ContentItem,
         target_type: str,
         rule: Optional[KnowledgeRule],
-        sku: Optional[str]
+        sku: Optional[str],
+        brand_name: str = "Freshsip",
+        db: Optional[Session] = None
     ) -> CorrectionSuggestion:
         if sku == "FS-PROD-003" or "celery" in (finding.title or "").lower():
             disclosure = "Contains Celery (14%). Keep refrigerated at 2°C to 5°C; consume within 24 hours of opening."
@@ -849,7 +897,7 @@ class SuggestionService:
                 proposed_text=disclosure,
                 diff_preview=diff,
                 explanation=explanation,
-                evidence_source="freshsip_brand_guidelines.pdf, Section E: Mandatory Wording and Disclosures",
+                evidence_source=f"{brand_name} Brand Guidelines, Section E: Mandatory Wording and Disclosures",
                 correction_type="mandatory_disclosure_insertion",
                 confidence="high",
                 can_auto_apply=True,
@@ -869,7 +917,7 @@ class SuggestionService:
             proposed_text=f"Insert disclosure in artwork layout: '{disclosure}'",
             diff_preview=f"+ {disclosure}",
             explanation=f"{explanation} Disclosure must appear in creative artwork. Update design file and re-upload.",
-            evidence_source="freshsip_brand_guidelines.pdf, Section E: Mandatory Wording and Disclosures",
+            evidence_source=f"{brand_name} Brand Guidelines, Section E: Mandatory Wording and Disclosures",
             correction_type="manual_guidance",
             confidence="high",
             can_auto_apply=False,
@@ -882,11 +930,13 @@ class SuggestionService:
         version: ContentVersion,
         item: ContentItem,
         target_type: str,
-        rule: Optional[KnowledgeRule]
+        rule: Optional[KnowledgeRule],
+        brand_name: str = "Freshsip",
+        db: Optional[Session] = None
     ) -> CorrectionSuggestion:
         original_excerpt = finding.text_excerpt or "Fear-based language"
         cleaned_orig = re.sub(r"^\[Page \d+\]\s*", "", original_excerpt).strip("'\" ")
-        replacement = "Looking for a crisp, refreshing afternoon pick-me-up? Enjoy a chilled bottle of Freshsip."
+        replacement = f"Looking for a crisp, refreshing afternoon pick-me-up? Enjoy a chilled bottle of {brand_name}."
 
         if target_type == "body_text":
             body = version.body_text or ""
@@ -908,7 +958,7 @@ class SuggestionService:
                     proposed_text=replacement,
                     diff_preview=diff,
                     explanation="Replaces fear-based, alarmist tone with friendly, approachable brand voice (FR-RULE-002).",
-                    evidence_source="freshsip_brand_guidelines.pdf, Section B: Tone of Voice",
+                    evidence_source=f"{brand_name} Brand Guidelines, Section B: Tone of Voice",
                     correction_type="tone_refinement",
                     confidence="high",
                     can_auto_apply=True,
@@ -927,8 +977,8 @@ class SuggestionService:
             original_text=cleaned_orig,
             proposed_text="Replace alarmist headline with approachable brand tone in design layout.",
             diff_preview=f"- {cleaned_orig}\n+ {replacement}",
-            explanation="Freshsip brand voice is friendly and trustworthy. Update creative artwork in authoring tool.",
-            evidence_source="freshsip_brand_guidelines.pdf, Section B: Tone of Voice",
+            explanation=f"{brand_name} brand voice is friendly and trustworthy. Update creative artwork in authoring tool.",
+            evidence_source=f"{brand_name} Brand Guidelines, Section B: Tone of Voice",
             correction_type="manual_guidance",
             confidence="high",
             can_auto_apply=False,
@@ -942,7 +992,9 @@ class SuggestionService:
         item: ContentItem,
         target_type: str,
         rule: Optional[KnowledgeRule],
-        sku: Optional[str]
+        sku: Optional[str],
+        brand_name: str = "Freshsip",
+        db: Optional[Session] = None
     ) -> CorrectionSuggestion:
         original_excerpt = finding.text_excerpt or "Visual finding"
         page_ctx = f"on Page {finding.page_number} " if finding.page_number else "in creative artwork "
@@ -956,7 +1008,7 @@ class SuggestionService:
         elif "alt text" in (finding.title or "").lower():
             meta = CANONICAL_PRODUCT_METADATA.get(sku or "", {})
             prod_name = meta.get("name", "juice")
-            proposed_alt = f"Bottle of Freshsip {prod_name} (250 mL) in glass packaging with fresh fruit ingredients."
+            proposed_alt = f"Bottle of {brand_name} {prod_name} (250 mL) in glass packaging with fresh fruit ingredients."
             return CorrectionSuggestion(
                 finding_id=finding.id,
                 content_item_id=item.id,
@@ -970,7 +1022,7 @@ class SuggestionService:
                 proposed_text=proposed_alt,
                 diff_preview=f"+ {proposed_alt}",
                 explanation="Accessibility requirement: Images must provide descriptive alt text for screen readers.",
-                evidence_source="freshsip_brand_guidelines.pdf, Section G: Asset-Use Rules",
+                evidence_source=f"{brand_name} Brand Guidelines, Section G: Asset-Use Rules",
                 correction_type="accessibility_remediation",
                 confidence="high",
                 can_auto_apply=True,

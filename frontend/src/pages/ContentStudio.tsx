@@ -93,18 +93,73 @@ export const ContentStudio: React.FC = () => {
   const [suggestionApplying, setSuggestionApplying] = useState(false);
   const [suggestionBanner, setSuggestionBanner] = useState<{ type: 'success' | 'info' | 'error'; text: string } | null>(null);
 
+  // Round 3 Phase 2: Dynamic Product Selection & Real-Time In-Editor Assistant
+  const [products, setProducts] = useState<any[]>([]);
+  const [selectedProductId, setSelectedProductId] = useState<string>('');
+  const [liveInfractions, setLiveInfractions] = useState<any[]>([]);
+  const [isLiveChecking, setIsLiveChecking] = useState(false);
+  const liveCheckDebounceRef = useRef<any>(null);
+
   const isCreator = role === 'content_creator' || role === 'org_admin';
+
+  // 600ms Debounced In-Editor Live Check (Round 2 Commitment 1 / Round 3 P0-3)
+  useEffect(() => {
+    if (!bodyText.trim()) {
+      setLiveInfractions([]);
+      return;
+    }
+
+    if (liveCheckDebounceRef.current) {
+      clearTimeout(liveCheckDebounceRef.current);
+    }
+
+    liveCheckDebounceRef.current = setTimeout(async () => {
+      setIsLiveChecking(true);
+      try {
+        const res = await api.liveCheck({
+          brand_id: selectedBrandId || undefined,
+          product_id: selectedProductId || undefined,
+          channel,
+          title,
+          body_text: bodyText
+        });
+        setLiveInfractions(res.infractions || []);
+      } catch (err) {
+        console.warn('Real-time live check skipped:', err);
+      } finally {
+        setIsLiveChecking(false);
+      }
+    }, 600);
+
+    return () => {
+      if (liveCheckDebounceRef.current) {
+        clearTimeout(liveCheckDebounceRef.current);
+      }
+    };
+  }, [bodyText, selectedProductId, channel, selectedBrandId, title]);
+
+  const applyLiveAutoFix = (inf: any) => {
+    if (inf.matched_text && inf.replacement_text) {
+      setBodyText(prev => prev.replace(inf.matched_text, inf.replacement_text));
+      setIsDirty(true);
+    } else if (inf.replacement_text && !inf.matched_text) {
+      setBodyText(inf.replacement_text);
+      setIsDirty(true);
+    }
+  };
 
   const loadContents = async (silent = false) => {
     try {
-      const [items, b, a] = await Promise.all([
+      const [items, b, a, prods] = await Promise.all([
         api.getContentItems(),
         api.getBrands(),
-        api.getAssets()
+        api.getAssets(),
+        api.getProducts().catch(() => [])
       ]);
       setContentList(items);
       setBrands(b);
       setAssets(a);
+      setProducts(prods || []);
       if (b.length > 0 && !selectedBrandId) {
         setSelectedBrandId(b[0].id);
       }
@@ -146,6 +201,7 @@ export const ContentStudio: React.FC = () => {
     setTitle(item.title);
     setChannel(item.channel);
     setSelectedBrandId(item.brand_id);
+    setSelectedProductId(item.product_id || '');
     setBodyText(item.latest_version?.body_text || '');
     setGovError(null);
     setIsDirty(false);
@@ -249,6 +305,7 @@ export const ContentStudio: React.FC = () => {
     setCheckedVersionNum(null);
     setGovError(null);
     setIsDirty(false);
+    setSelectedProductId('');
     setVersions([]);
     if (brands.length > 0) {
       setSelectedBrandId(brands[0].id);
@@ -348,7 +405,8 @@ export const ContentStudio: React.FC = () => {
           channel,
           posterFilePath || undefined,
           posterAssetId || undefined,
-          posterAltText ? posterAltText.trim() : undefined
+          posterAltText ? posterAltText.trim() : undefined,
+          selectedProductId || undefined
         );
       } else {
         savedItem = await api.createContentItem(
@@ -358,7 +416,8 @@ export const ContentStudio: React.FC = () => {
           trimmedBody,
           posterFilePath || undefined,
           posterAssetId || undefined,
-          posterAltText ? posterAltText.trim() : undefined
+          posterAltText ? posterAltText.trim() : undefined,
+          selectedProductId || undefined
         );
       }
 
@@ -730,6 +789,26 @@ export const ContentStudio: React.FC = () => {
                 </select>
               </div>
             )}
+            {products.length > 0 && (
+              <div style={{ width: 210 }}>
+                <label className="form-label">Target Product (Catalogue)</label>
+                <select
+                  value={selectedProductId}
+                  onChange={(e) => {
+                    setSelectedProductId(e.target.value);
+                    setIsDirty(true);
+                  }}
+                  className="select"
+                >
+                  <option value="">General / All Products</option>
+                  {products.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.product_name} {p.sku ? `(${p.sku})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div style={{ width: 170 }}>
               <label className="form-label">Target Channel</label>
               <select
@@ -750,7 +829,7 @@ export const ContentStudio: React.FC = () => {
           </div>
 
           {/* Copy Editor */}
-          <div style={{ display: 'flex', flexDirection: 'column', marginBottom: 16 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', marginBottom: 12 }}>
             <div className="flex-between" style={{ marginBottom: 6 }}>
               <label className="form-label">Marketing Copy Text</label>
               <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>
@@ -768,6 +847,87 @@ export const ContentStudio: React.FC = () => {
               placeholder="Draft promotional text here. Evaluated against approved terminology, mandatory disclosures, and product facts..."
               style={{ minHeight: 140, fontSize: '0.92rem', lineHeight: 1.5 }}
             />
+          </div>
+
+          {/* Round 2 Commitment 1 / Round 3 P0-3: Debounced In-Editor Real-Time Assistant with 1-Click Auto-Fix */}
+          <div style={{
+            marginBottom: 16,
+            padding: '10px 14px',
+            borderRadius: 8,
+            background: liveInfractions.length > 0 ? 'rgba(239, 68, 68, 0.08)' : (bodyText.trim() ? 'rgba(34, 197, 94, 0.06)' : 'rgba(255, 255, 255, 0.03)'),
+            border: `1px solid ${liveInfractions.length > 0 ? 'rgba(239, 68, 68, 0.3)' : (bodyText.trim() ? 'rgba(34, 197, 94, 0.25)' : 'rgba(255, 255, 255, 0.08)')}`
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: liveInfractions.length > 0 ? 8 : 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: '50%',
+                  background: isLiveChecking ? '#38bdf8' : (liveInfractions.length > 0 ? '#ef4444' : (bodyText.trim() ? '#22c55e' : '#64748b')),
+                  boxShadow: isLiveChecking ? '0 0 8px #38bdf8' : 'none'
+                }} />
+                <span style={{ fontSize: '0.78rem', fontWeight: 600, color: '#e2e8f0', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Sparkles size={14} color="#818cf8" />
+                  Real-Time In-Editor Assistant
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)', fontWeight: 400 }}>
+                    (600ms Debounce • Zero-Billing Local Engine)
+                  </span>
+                </span>
+              </div>
+              <span style={{
+                fontSize: '0.72rem',
+                fontWeight: 600,
+                padding: '2px 8px',
+                borderRadius: 999,
+                background: liveInfractions.length > 0 ? 'rgba(239, 68, 68, 0.2)' : (bodyText.trim() ? 'rgba(34, 197, 94, 0.15)' : 'rgba(255, 255, 255, 0.05)'),
+                color: liveInfractions.length > 0 ? '#f87171' : (bodyText.trim() ? '#4ade80' : 'var(--text-dim)')
+              }}>
+                {isLiveChecking ? 'Analyzing...' : (!bodyText.trim() ? 'Awaiting copy' : (liveInfractions.length === 0 ? '✓ Copy is Clean' : `${liveInfractions.length} Issue${liveInfractions.length > 1 ? 's' : ''} Detected`))}
+              </span>
+            </div>
+
+            {liveInfractions.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+                {liveInfractions.map((inf) => (
+                  <div key={inf.id} style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '8px 10px',
+                    borderRadius: 6,
+                    background: 'rgba(0,0,0,0.3)',
+                    border: '1px solid rgba(255,255,255,0.06)'
+                  }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginRight: 8 }}>
+                      <div style={{ fontSize: '0.78rem', fontWeight: 600, color: inf.severity === 'error' ? '#f87171' : '#fbbf24', display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <AlertTriangle size={13} />
+                        {inf.title}
+                        {inf.rule_code && <span style={{ fontSize: '0.68rem', opacity: 0.7 }}>[{inf.rule_code}]</span>}
+                      </div>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>
+                        {inf.explanation}
+                      </div>
+                    </div>
+                    {inf.can_autofix && inf.replacement_text && (
+                      <button
+                        type="button"
+                        onClick={() => applyLiveAutoFix(inf)}
+                        className="btn btn-primary"
+                        style={{
+                          padding: '4px 10px',
+                          fontSize: '0.72rem',
+                          background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
+                          whiteSpace: 'nowrap',
+                          gap: 4
+                        }}
+                      >
+                        <Sparkles size={12} /> Auto-Fix
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Poster & Visual Asset Attachment Panel */}

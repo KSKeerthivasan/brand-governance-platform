@@ -4,7 +4,8 @@ import {
   ContentItem, ContentVersion, GovernanceRun, ApprovalSubmission,
   ApprovalDecision, AuditEvent, ImageGovernanceResult,
   AnalyticsOverview, RepeatedMistakesData, AmbiguityReportData, ReviewerFindingDisposition,
-  CorrectionSuggestion, CorrectionSuggestionApplyResponse
+  CorrectionSuggestion, CorrectionSuggestionApplyResponse,
+  BrandProfile, StagedImportPreview, KnowledgeBaseActivation, OrganizationInvitation, InvitationVerifyData
 } from '../types';
 
 let rawBase = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
@@ -307,12 +308,14 @@ class ApiService {
     bodyText: string,
     posterFilePath?: string,
     posterAssetId?: string,
-    posterAltText?: string
+    posterAltText?: string,
+    productId?: string
   ): Promise<ContentItem> {
     return this.request<ContentItem>('/content', {
       method: 'POST',
       body: JSON.stringify({
         brand_id: brandId,
+        product_id: productId || null,
         title,
         channel,
         body_text: bodyText,
@@ -330,7 +333,8 @@ class ApiService {
     channel?: string,
     posterFilePath?: string,
     posterAssetId?: string,
-    posterAltText?: string
+    posterAltText?: string,
+    productId?: string
   ): Promise<ContentItem> {
     return this.request<ContentItem>(`/content/${contentId}`, {
       method: 'PUT',
@@ -338,6 +342,7 @@ class ApiService {
         body_text: bodyText,
         title,
         channel,
+        product_id: productId !== undefined ? productId : null,
         poster_file_path: posterFilePath,
         poster_asset_id: posterAssetId,
         poster_alt_text: posterAltText
@@ -444,6 +449,219 @@ class ApiService {
 
   async getFindingDispositions(findingId: string): Promise<ReviewerFindingDisposition[]> {
     return this.request<ReviewerFindingDisposition[]>(`/analytics/findings/${findingId}/feedback`);
+  }
+
+  // -------------------------------------------------------------------------
+  // ROUND 3: BRAND PROFILE, EXCEL STAGING & INVITATIONS
+  // -------------------------------------------------------------------------
+
+  getExcelTemplateUrl(templateType: 'product_catalogue' | 'claims_and_disclosures'): string {
+    return `${API_BASE}/knowledge/templates/${templateType}`;
+  }
+
+  async downloadExcelTemplate(templateType: 'product_catalogue' | 'claims_and_disclosures'): Promise<void> {
+    const headers = new Headers();
+    if (this.token) {
+      headers.set('Authorization', `Bearer ${this.token}`);
+    }
+    if (this.organizationId) {
+      headers.set('X-Organization-Id', this.organizationId);
+    }
+    const res = await fetch(`${API_BASE}/knowledge/templates/${templateType}`, {
+      headers
+    });
+    if (!res.ok) {
+      throw new Error(`Failed to download template (${res.status}): ${res.statusText}`);
+    }
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${templateType}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+  }
+
+  async previewExcelImport(
+    importType: 'product_catalogue' | 'claims_and_disclosures',
+    file: File,
+    idempotencyKey?: string
+  ): Promise<StagedImportPreview> {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (idempotencyKey) {
+      formData.append('idempotency_key', idempotencyKey);
+    }
+
+    return this.request<StagedImportPreview>(`/knowledge/import/${importType}/preview`, {
+      method: 'POST',
+      body: formData
+    });
+  }
+
+  async getImportPreview(importId: string): Promise<StagedImportPreview> {
+    return this.request<StagedImportPreview>(`/knowledge/import/${importId}/preview`);
+  }
+
+  async confirmImport(importId: string): Promise<{ status: string; committed_products?: number; committed_claims?: number; committed_disclosures?: number }> {
+    return this.request<{ status: string; committed_products?: number; committed_claims?: number; committed_disclosures?: number }>(`/knowledge/import/${importId}/confirm`, {
+      method: 'POST'
+    });
+  }
+
+  async discardImport(importId: string): Promise<{ status: string }> {
+    return this.request<{ status: string }>(`/knowledge/import/${importId}/discard`, {
+      method: 'POST'
+    });
+  }
+
+  async getBrandProfile(): Promise<BrandProfile | null> {
+    try {
+      return await this.request<BrandProfile>('/knowledge/brand-profile');
+    } catch (e: any) {
+      if (e.message && e.message.includes('404')) return null;
+      throw e;
+    }
+  }
+
+  async saveBrandProfile(profile: Partial<BrandProfile>): Promise<BrandProfile> {
+    return this.request<BrandProfile>('/knowledge/brand-profile', {
+      method: 'POST',
+      body: JSON.stringify(profile)
+    });
+  }
+
+  async activateKnowledgeBase(reason?: string): Promise<KnowledgeBaseActivation> {
+    return this.request<KnowledgeBaseActivation>('/knowledge/activate', {
+      method: 'POST',
+      body: JSON.stringify({ activation_reason: reason })
+    });
+  }
+
+  // Team Invitations
+  async getInvitations(orgId: string): Promise<OrganizationInvitation[]> {
+    return this.request<OrganizationInvitation[]>(`/organizations/${orgId}/invitations`);
+  }
+
+  async createInvitation(
+    orgId: string,
+    email: string,
+    role: string,
+    inviteeName?: string
+  ): Promise<OrganizationInvitation> {
+    return this.request<OrganizationInvitation>(`/organizations/${orgId}/invitations`, {
+      method: 'POST',
+      body: JSON.stringify({ email, role, invitee_name: inviteeName })
+    });
+  }
+
+  async resendInvitation(orgId: string, invitationId: string): Promise<OrganizationInvitation> {
+    return this.request<OrganizationInvitation>(`/organizations/${orgId}/invitations/${invitationId}/resend`, {
+      method: 'POST'
+    });
+  }
+
+  async revokeInvitation(orgId: string, invitationId: string): Promise<OrganizationInvitation> {
+    return this.request<OrganizationInvitation>(`/organizations/${orgId}/invitations/${invitationId}/revoke`, {
+      method: 'POST'
+    });
+  }
+
+  async verifyInvitation(token: string): Promise<InvitationVerifyData> {
+    const res = await fetch(`${API_BASE}/invitations/verify?token=${encodeURIComponent(token)}`);
+    if (!res.ok) {
+      let msg = `Verification failed (${res.status})`;
+      try {
+        const errJson = await res.json();
+        msg = errJson.detail || msg;
+      } catch {}
+      throw new Error(msg);
+    }
+    return res.json();
+  }
+
+  async acceptInvitation(payload: { token: string; full_name?: string; password?: string }): Promise<any> {
+    const res = await fetch(`${API_BASE}/invitations/accept`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      let msg = `Acceptance failed (${res.status})`;
+      try {
+        const errJson = await res.json();
+        msg = errJson.detail || msg;
+      } catch {}
+      throw new Error(msg);
+    }
+    return res.json();
+  }
+
+  // Products, Claims, Disclosures
+  async getProducts(): Promise<any[]> {
+    return this.request<any[]>('/knowledge/products');
+  }
+
+  async getClaims(): Promise<any[]> {
+    return this.request<any[]>('/knowledge/claims');
+  }
+
+  async getDisclosures(): Promise<any[]> {
+    return this.request<any[]>('/knowledge/disclosures');
+  }
+
+  // Real-Time In-Editor Assistant (Round 2 Commitment 1)
+  async liveCheck(payload: {
+    brand_id?: string;
+    product_id?: string;
+    channel?: string;
+    title?: string;
+    body_text: string;
+  }): Promise<{
+    status: string;
+    infractions: Array<{
+      id: string;
+      rule_code?: string;
+      category: string;
+      severity: string;
+      title: string;
+      explanation: string;
+      matched_text?: string;
+      replacement_text?: string;
+      can_autofix: boolean;
+    }>;
+    total_infractions: number;
+  }> {
+    return this.request('/knowledge/live-check', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  // Guideline Impact Rescoring (Round 2 Commitment 3)
+  async getRescoreJobs(): Promise<any[]> {
+    return this.request<any[]>('/knowledge/rescore-jobs');
+  }
+
+  async getRescoreJob(jobId: string): Promise<any> {
+    return this.request<any>(`/knowledge/rescore-jobs/${jobId}`);
+  }
+
+  async triggerRescoreJob(payload?: {
+    knowledge_base_version_id?: string;
+    scope?: string;
+    channel?: string;
+  }): Promise<any> {
+    return this.request('/knowledge/rescore-trigger', {
+      method: 'POST',
+      body: JSON.stringify(payload || {})
+    });
+  }
+
+  async getKnowledgeBaseVersions(): Promise<any[]> {
+    return this.request<any[]>('/knowledge/versions');
   }
 }
 

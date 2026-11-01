@@ -1,6 +1,15 @@
 import uuid
-from datetime import datetime
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, UniqueConstraint, Enum
+from datetime import datetime, timedelta
+from sqlalchemy import (
+    Column,
+    String,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    UniqueConstraint,
+    CheckConstraint,
+    Index,
+)
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -10,6 +19,8 @@ class Organization(Base):
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     name = Column(String(255), nullable=False)
     slug = Column(String(100), unique=True, nullable=False, index=True)
+    is_archived = Column(Boolean, default=False, nullable=False)
+    archived_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
@@ -18,6 +29,7 @@ class Organization(Base):
     knowledge_sources = relationship("KnowledgeSource", back_populates="organization", cascade="all, delete-orphan")
     content_items = relationship("ContentItem", back_populates="organization", cascade="all, delete-orphan")
     audit_events = relationship("AuditEvent", back_populates="organization", cascade="all, delete-orphan")
+    invitations = relationship("OrganizationInvitation", back_populates="organization", cascade="all, delete-orphan")
 
 
 class User(Base):
@@ -73,3 +85,48 @@ class RevokedToken(Base):
 
     user = relationship("User", back_populates="revoked_tokens")
 
+
+class OrganizationInvitation(Base):
+    """
+    Secure invitation model for workspace team onboarding.
+    Supports email normalization, single pending invitation constraint,
+    inviter audit preservation, and single-use token consumption.
+    """
+    __tablename__ = "organization_invitations"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    organization_id = Column(String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    email_normalized = Column(String(255), nullable=False, index=True)
+    role = Column(String(50), nullable=False)  # OrganizationRole
+    token_hash = Column(String(64), unique=True, nullable=False, index=True)
+    delivery_method = Column(String(50), default="firebase_email_link", nullable=False)
+    delivery_status = Column(String(50), default="pending", nullable=False)
+    status = Column(String(50), default="pending", nullable=False)  # pending, accepted, expired, revoked
+    invited_by = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    inviter_email_snapshot = Column(String(255), nullable=False)
+    accepted_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    expires_at = Column(DateTime, default=lambda: datetime.utcnow() + timedelta(days=7), nullable=False)
+    consumed_at = Column(DateTime, nullable=True)
+
+    organization = relationship("Organization", back_populates="invitations")
+    inviter = relationship("User", foreign_keys=[invited_by])
+    accepted_by = relationship("User", foreign_keys=[accepted_by_user_id])
+
+    __table_args__ = (
+        CheckConstraint(
+            "role IN ('org_admin', 'knowledge_reviewer', 'content_creator', 'approval_manager')",
+            name="chk_invitation_role",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'accepted', 'expired', 'revoked')",
+            name="chk_invitation_status",
+        ),
+        Index(
+            "idx_single_pending_invitation",
+            "organization_id",
+            "email_normalized",
+            unique=True,
+            postgresql_where=Column("status") == "pending",
+        ),
+    )
