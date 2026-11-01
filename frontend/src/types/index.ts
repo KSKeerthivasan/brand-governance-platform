@@ -438,12 +438,19 @@ export interface AmbiguityReportData {
 
 export interface BrandColor {
   id?: string;
-  name: string;
-  hex_code: string;
-  role: 'primary' | 'secondary' | 'accent' | 'background' | 'other';
+  name?: string;
+  colour_name?: string;
+  hex_code?: string;
+  hex_value?: string;
+  role?: 'primary' | 'secondary' | 'accent' | 'background' | 'other' | string;
+  colour_role?: 'primary' | 'secondary' | 'accent' | 'background' | 'other' | string;
+  colour_family?: string;
   pantone?: string;
   cmyk?: string;
   rgb?: string;
+  rgb_r?: number;
+  rgb_g?: number;
+  rgb_b?: number;
   usage_instructions?: string;
 }
 
@@ -459,6 +466,8 @@ export interface BrandProfile {
   preferred_terminology?: string[];
   prohibited_terminology?: string[];
   writing_style: string;
+  spelling_convention?: string;
+  writing_style_instructions?: string;
   approved_languages?: string[];
   primary_heading_font?: string;
   secondary_body_font?: string;
@@ -467,6 +476,7 @@ export interface BrandProfile {
   visual_style?: string[];
   preferred_imagery_style?: string[];
   preferred_backgrounds?: string[];
+  preferred_visual_treatments?: string[];
   visual_styles_to_avoid?: string[];
   logo_usage_instructions?: string;
   colors?: BrandColor[];

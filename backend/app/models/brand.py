@@ -53,7 +53,9 @@ class BrandProfile(Base):
     tones_to_avoid = Column(JSON, nullable=False, default=list)
     preferred_terminology = Column(JSON, nullable=False, default=list)
     prohibited_terminology = Column(JSON, nullable=False, default=list)
-    writing_style = Column(String(100), nullable=False)
+    writing_style = Column(Text, nullable=False)
+    spelling_convention = Column(String(50), nullable=True)  # British English, American English, Other
+    writing_style_instructions = Column(Text, nullable=True)
     approved_languages = Column(JSON, nullable=False, default=lambda: ["en"])
 
     # Section D: Typography
@@ -63,9 +65,10 @@ class BrandProfile(Base):
     typography_instructions = Column(Text, nullable=True)
 
     # Section E: Visual Identity Rules
-    visual_style = Column(JSON, nullable=False, default=list)
+    visual_style = Column(JSON, nullable=False, default=list)  # Preferred Visual Treatments
     preferred_imagery_style = Column(JSON, nullable=False, default=list)
     preferred_backgrounds = Column(JSON, nullable=False, default=list)
+    preferred_visual_treatments = Column(JSON, nullable=False, default=list)
     visual_styles_to_avoid = Column(JSON, nullable=False, default=list)
     logo_usage_instructions = Column(Text, nullable=True)
 
@@ -98,6 +101,7 @@ class BrandColor(Base):
     rgb_r = Column(Integer, nullable=False)
     rgb_g = Column(Integer, nullable=False)
     rgb_b = Column(Integer, nullable=False)
+    usage_instructions = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     brand_profile = relationship("BrandProfile", back_populates="colors")

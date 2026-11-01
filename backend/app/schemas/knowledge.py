@@ -178,6 +178,7 @@ class BrandColorIn(BaseModel):
     rgb_r: int
     rgb_g: int
     rgb_b: int
+    usage_instructions: Optional[str] = None
 
 class BrandColorOut(BrandColorIn):
     id: str
@@ -188,31 +189,7 @@ class BrandColorOut(BrandColorIn):
 
 class BrandProfileIn(BaseModel):
     brand_name: str
-    brand_description: str
-    approved_taglines: List[str] = []
-    brand_personality: List[str]
-    preferred_tone: List[str]
-    tones_to_avoid: List[str] = []
-    preferred_terminology: List[str] = []
-    prohibited_terminology: List[str] = []
-    writing_style: str
-    approved_languages: List[str]
-    colors: List[BrandColorIn] = []
-    primary_heading_font: str
-    secondary_body_font: str
-    additional_approved_fonts: List[str] = []
-    typography_instructions: Optional[str] = None
-    visual_style: List[str]
-    preferred_imagery_style: List[str]
-    preferred_backgrounds: List[str] = []
-    visual_styles_to_avoid: List[str] = []
-    logo_usage_instructions: Optional[str] = None
-
-class BrandProfileOut(BaseModel):
-    id: str
-    organization_id: str
-    brand_name: str
-    brand_description: str
+    brand_description: Optional[str] = ""
     approved_taglines: List[str] = []
     brand_personality: List[str] = []
     preferred_tone: List[str] = []
@@ -220,6 +197,35 @@ class BrandProfileOut(BaseModel):
     preferred_terminology: List[str] = []
     prohibited_terminology: List[str] = []
     writing_style: str
+    spelling_convention: Optional[str] = None
+    writing_style_instructions: Optional[str] = None
+    approved_languages: List[str] = []
+    colors: List[BrandColorIn] = []
+    primary_heading_font: Optional[str] = "Inter"
+    secondary_body_font: Optional[str] = "Roboto"
+    additional_approved_fonts: List[str] = []
+    typography_instructions: Optional[str] = None
+    visual_style: List[str] = []
+    preferred_imagery_style: List[str] = []
+    preferred_backgrounds: List[str] = []
+    preferred_visual_treatments: List[str] = []
+    visual_styles_to_avoid: List[str] = []
+    logo_usage_instructions: Optional[str] = None
+
+class BrandProfileOut(BaseModel):
+    id: str
+    organization_id: str
+    brand_name: str
+    brand_description: Optional[str] = ""
+    approved_taglines: List[str] = []
+    brand_personality: List[str] = []
+    preferred_tone: List[str] = []
+    tones_to_avoid: List[str] = []
+    preferred_terminology: List[str] = []
+    prohibited_terminology: List[str] = []
+    writing_style: str
+    spelling_convention: Optional[str] = None
+    writing_style_instructions: Optional[str] = None
     approved_languages: List[str] = []
     colors: List[BrandColorOut] = []
     primary_heading_font: str
@@ -229,6 +235,7 @@ class BrandProfileOut(BaseModel):
     visual_style: List[str] = []
     preferred_imagery_style: List[str] = []
     preferred_backgrounds: List[str] = []
+    preferred_visual_treatments: List[str] = []
     visual_styles_to_avoid: List[str] = []
     logo_usage_instructions: Optional[str] = None
     created_at: datetime

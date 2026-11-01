@@ -1266,7 +1266,7 @@ def save_brand_profile(
         profile = BrandProfile(
             organization_id=org_id,
             brand_name=req.brand_name,
-            brand_description=req.brand_description,
+            brand_description=req.brand_description or "",
             approved_taglines=req.approved_taglines,
             brand_personality=req.brand_personality,
             preferred_tone=req.preferred_tone,
@@ -1274,14 +1274,17 @@ def save_brand_profile(
             preferred_terminology=req.preferred_terminology,
             prohibited_terminology=req.prohibited_terminology,
             writing_style=req.writing_style,
+            spelling_convention=req.spelling_convention,
+            writing_style_instructions=req.writing_style_instructions,
             approved_languages=req.approved_languages,
-            primary_heading_font=req.primary_heading_font,
-            secondary_body_font=req.secondary_body_font,
+            primary_heading_font=req.primary_heading_font or "Inter",
+            secondary_body_font=req.secondary_body_font or "Roboto",
             additional_approved_fonts=req.additional_approved_fonts,
             typography_instructions=req.typography_instructions,
             visual_style=req.visual_style,
             preferred_imagery_style=req.preferred_imagery_style,
             preferred_backgrounds=req.preferred_backgrounds,
+            preferred_visual_treatments=req.preferred_visual_treatments,
             visual_styles_to_avoid=req.visual_styles_to_avoid,
             logo_usage_instructions=req.logo_usage_instructions
         )
@@ -1289,7 +1292,7 @@ def save_brand_profile(
         db.flush()
     else:
         profile.brand_name = req.brand_name
-        profile.brand_description = req.brand_description
+        profile.brand_description = req.brand_description or ""
         profile.approved_taglines = req.approved_taglines
         profile.brand_personality = req.brand_personality
         profile.preferred_tone = req.preferred_tone
@@ -1297,14 +1300,17 @@ def save_brand_profile(
         profile.preferred_terminology = req.preferred_terminology
         profile.prohibited_terminology = req.prohibited_terminology
         profile.writing_style = req.writing_style
+        profile.spelling_convention = req.spelling_convention
+        profile.writing_style_instructions = req.writing_style_instructions
         profile.approved_languages = req.approved_languages
-        profile.primary_heading_font = req.primary_heading_font
-        profile.secondary_body_font = req.secondary_body_font
+        profile.primary_heading_font = req.primary_heading_font or "Inter"
+        profile.secondary_body_font = req.secondary_body_font or "Roboto"
         profile.additional_approved_fonts = req.additional_approved_fonts
         profile.typography_instructions = req.typography_instructions
         profile.visual_style = req.visual_style
         profile.preferred_imagery_style = req.preferred_imagery_style
         profile.preferred_backgrounds = req.preferred_backgrounds
+        profile.preferred_visual_treatments = req.preferred_visual_treatments
         profile.visual_styles_to_avoid = req.visual_styles_to_avoid
         profile.logo_usage_instructions = req.logo_usage_instructions
         profile.updated_at = datetime.utcnow()
@@ -1322,7 +1328,8 @@ def save_brand_profile(
             hex_value=c.hex_value,
             rgb_r=c.rgb_r,
             rgb_g=c.rgb_g,
-            rgb_b=c.rgb_b
+            rgb_b=c.rgb_b,
+            usage_instructions=c.usage_instructions
         )
         db.add(color_obj)
         new_colors.append(color_obj)
@@ -1453,6 +1460,8 @@ def activate_knowledge_base(
             "preferred_terminology": brand_profile.preferred_terminology or [],
             "prohibited_terminology": brand_profile.prohibited_terminology or [],
             "writing_style": brand_profile.writing_style,
+            "spelling_convention": brand_profile.spelling_convention,
+            "writing_style_instructions": brand_profile.writing_style_instructions,
             "approved_languages": brand_profile.approved_languages or [],
             "heading_font": brand_profile.primary_heading_font,
             "body_font": brand_profile.secondary_body_font,
@@ -1460,6 +1469,7 @@ def activate_knowledge_base(
             "visual_style": brand_profile.visual_style or [],
             "imagery_style": brand_profile.preferred_imagery_style or [],
             "backgrounds": brand_profile.preferred_backgrounds or [],
+            "preferred_visual_treatments": brand_profile.preferred_visual_treatments or [],
             "visual_styles_to_avoid": brand_profile.visual_styles_to_avoid or [],
             "logo_instructions": brand_profile.logo_usage_instructions,
         },
