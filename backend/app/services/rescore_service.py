@@ -126,7 +126,8 @@ class ImpactRescoreService:
                         db=db,
                         content_version=latest_version,
                         executed_by_user_id=user_id,
-                        product_id=item.product_id
+                        product_id=item.product_id,
+                        knowledge_base_version_id=kb_version.id
                     )
                     batch_item.new_governance_run_id = new_run.id
                     batch_item.status = "completed"

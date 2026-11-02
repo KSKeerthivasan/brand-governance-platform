@@ -43,7 +43,7 @@ PRODUCT_CATALOGUE_COLUMNS = [
 CLAIMS_REGISTER_COLUMNS = [
     ("claim_id", "Unique claim identifier within organisation", True),
     ("claim_text", "Official promotional claim statement being governed", True),
-    ("claim_type", "Ingredient, Nutritional, Health, Performance, Quality, Comparative, Environmental, Endorsement, Origin, Safety, Other", True),
+    ("claim_type", "Claim category (e.g. Ingredient, Performance, Safety, Quality, or organisation's custom category)", True),
     ("claim_status", "Approved, Restricted, or Prohibited", True),
     ("applicable_product_id", "Specific product_id or ALL (ALL scopes strictly within this organisation)", True),
     ("approved_variations", "Alternative authorised wording (semicolon or newline delimited). Prohibited claims cannot contain variations", False),
@@ -66,11 +66,13 @@ REQUIRED_DISCLOSURES_COLUMNS = [
 
 VALID_OFFERING_TYPES = {"Physical Product", "Service", "Digital Product", "Subscription"}
 VALID_PRODUCT_RECORD_STATUSES = {"Active", "Inactive", "Discontinued"}
-VALID_CLAIM_TYPES = {
+# Standard recommended claim categories (organisations can also supply custom categories)
+STANDARD_CLAIM_TYPES = {
     "Ingredient", "Nutritional", "Health", "Performance",
     "Quality", "Comparative", "Environmental", "Endorsement",
     "Origin", "Safety", "Other"
 }
+VALID_CLAIM_TYPES = STANDARD_CLAIM_TYPES
 VALID_CLAIM_STATUSES = {"Approved", "Restricted", "Prohibited"}
 VALID_DISCLOSURE_SEVERITIES = {"Low", "Medium", "High", "Critical"}
 VALID_DISCLOSURE_RECORD_STATUSES = {"Active", "Inactive"}
@@ -280,7 +282,7 @@ class ExcelImportService:
             claims_guide = [
                 ("1", "claim_id", "Required", "Unique alphanumeric string", "Unique claim ID within organisation (e.g. CLM001)."),
                 ("2", "claim_text", "Required", "Exact official claim statement", "The core promotional statement being governed."),
-                ("3", "claim_type", "Required", "Ingredient, Nutritional, Health, Performance, Quality, Comparative, Environmental, Endorsement, Origin, Safety, Other", "Formal classification of claim."),
+                ("3", "claim_type", "Required", "Text (max 50 chars)", "Claim category (e.g. Ingredient, Performance, Safety, Quality, or your organisation's own custom category)."),
                 ("4", "claim_status", "Required", "Approved, Restricted, Prohibited", "Status determining authorisation enforcement."),
                 ("5", "applicable_product_id", "Required", "Valid product_id or ALL", "Product SKU or 'ALL' (tenant-scoped). Must exist in active catalogue."),
                 ("6", "approved_variations", "Optional (Forbidden for Prohibited)", "Semicolon or newline text", "Authorised alternative phrases. Must not extend claim meaning."),
@@ -405,9 +407,79 @@ class ExcelImportService:
         wb.save(buf)
         return buf.getvalue()
 
-    # -------------------------------------------------------------------------
+# -------------------------------------------------------------------------
     # 2. STAGING & VALIDATION (PREVIEW ONLY - ZERO ACTIVE RECORD MUTATION)
     # -------------------------------------------------------------------------
+
+    def _check_hidden_and_merged(self, ws: openpyxl.worksheet.worksheet.Worksheet, sheet_display_name: str) -> List[str]:
+        errors = []
+        if ws.sheet_state != "visible":
+            errors.append(f"[{sheet_display_name}] Worksheet is hidden (state='{ws.sheet_state}'). Hidden worksheets are strictly rejected to prevent accidental data extraction.")
+
+        for rng in ws.merged_cells.ranges:
+            if rng.max_row >= 2:
+                errors.append(f"[{sheet_display_name}] Merged cells detected in data region at {rng.coord}. Merged cells alter tabular layout and are strictly prohibited.")
+        return errors
+
+    def _validate_headers(
+        self,
+        header_cells: List[Any],
+        expected_columns: List[Tuple[str, str, bool]],
+        sheet_display_name: str
+    ) -> Tuple[Optional[Dict[str, int]], List[str]]:
+        errors = []
+        raw_headers = [c.value for c in header_cells]
+        str_headers = [str(h).strip() if h is not None else "" for h in raw_headers]
+
+        # Trim trailing blank cells
+        while str_headers and str_headers[-1] == "":
+            str_headers.pop()
+
+        if not str_headers or all(h == "" for h in str_headers):
+            errors.append(f"[{sheet_display_name}] Header row is completely empty. Expected columns: {', '.join(c[0] for c in expected_columns)}.")
+            return None, errors
+
+        # Check for formulas in header cells
+        for idx, c in enumerate(header_cells[:len(str_headers)], start=1):
+            if c.data_type == "f" or (isinstance(c.value, str) and c.value.startswith("=")):
+                col_letter = get_column_letter(idx)
+                errors.append(f"[{sheet_display_name}] Column header at {col_letter}1 contains a formula ('{c.value}'). Header cells must be plain text.")
+
+        # Check for empty headers within populated range or duplicate headers
+        seen_headers: Dict[str, int] = {}
+        duplicates: List[str] = []
+        for idx, h in enumerate(str_headers):
+            if not h:
+                col_letter = get_column_letter(idx + 1)
+                errors.append(f"[{sheet_display_name}] Empty column header detected at column {col_letter}1.")
+                continue
+            h_lower = h.lower()
+            if h_lower in seen_headers:
+                duplicates.append(h)
+            else:
+                seen_headers[h_lower] = idx
+
+        if duplicates:
+            errors.append(f"[{sheet_display_name}] Duplicate column header(s) detected: {', '.join(sorted(set(duplicates)))}. Every column header must be unique.")
+
+        expected_cols = [col[0] for col in expected_columns]
+        expected_lower = {col[0].lower(): col[0] for col in expected_columns}
+
+        # Missing headers
+        missing = [orig for low, orig in expected_lower.items() if low not in seen_headers]
+        if missing:
+            errors.append(f"[{sheet_display_name}] Missing required column header(s): {', '.join(missing)}.")
+
+        # Unexpected extra headers
+        unexpected = [h for h in str_headers if h and h.lower() not in expected_lower]
+        if unexpected:
+            errors.append(f"[{sheet_display_name}] Unexpected column header(s) detected: {', '.join(unexpected)}. Header schema must exactly match expected columns.")
+
+        if errors:
+            return None, errors
+
+        col_index_map = {orig_col: seen_headers[orig_col.lower()] for orig_col in expected_cols}
+        return col_index_map, errors
 
     def parse_and_stage_excel(
         self,
@@ -420,6 +492,26 @@ class ExcelImportService:
         import_type: str
     ) -> StagedImport:
         file_hash = hashlib.sha256(file_bytes).hexdigest()
+
+        if not file_name or not file_name.lower().endswith('.xlsx'):
+            staged_import = StagedImport(
+                organization_id=org_id,
+                import_type=import_type,
+                idempotency_key=idempotency_key,
+                file_name=file_name or 'unknown',
+                file_sha256=file_hash,
+                status='failed',
+                created_by=user_id,
+                total_rows=0,
+                valid_rows=0,
+                error_rows=0,
+                has_disclosures=False,
+                validation_summary={'file_error': f"Invalid file extension. Only modern Excel files (.xlsx) are supported. Received '{file_name}'."}
+            )
+            db.add(staged_import)
+            db.commit()
+            db.refresh(staged_import)
+            return staged_import
 
         existing_import = db.query(StagedImport).filter(
             StagedImport.organization_id == org_id,
@@ -447,7 +539,7 @@ class ExcelImportService:
         db.flush()
 
         try:
-            wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
+            wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=False)
         except Exception as e:
             staged_import.status = "failed"
             staged_import.validation_summary = {"file_error": f"Invalid Excel (.xlsx) file: {str(e)}"}
@@ -478,104 +570,147 @@ class ExcelImportService:
         target_sheet_name = None
         for name in wb.sheetnames:
             norm_name = name.strip().lower().replace(" ", "_")
-            if norm_name in ("product_catalogue", "products", "sheet1"):
+            if norm_name in ("product_catalogue", "products"):
                 target_sheet_name = name
                 break
 
         if not target_sheet_name:
             staged_import.status = "failed"
             staged_import.validation_summary = {
-                "file_error": f"Required worksheet 'Product_Catalogue' not found. Sheets present: {wb.sheetnames}"
+                "file_error": f"Required worksheet 'Product_Catalogue' not found. Worksheets present: {wb.sheetnames}. Please use the exact worksheet name 'Product_Catalogue'."
             }
             return
 
+        expected_sheet_name = "Product_Catalogue"
         ws = wb[target_sheet_name]
-        rows = list(ws.iter_rows(values_only=True))
-        if not rows or len(rows) < 1:
-            staged_import.status = "failed"
-            staged_import.validation_summary = {"file_error": "Worksheet is empty"}
-            return
 
-        header_row = [str(c or '').strip() for c in rows[0]]
-        expected_cols = [c[0] for c in PRODUCT_CATALOGUE_COLUMNS]
-        col_index_map = {col.lower(): idx for idx, col in enumerate(header_row)}
-
-        missing_headers = [c for c in expected_cols if c.lower() not in col_index_map]
-        if missing_headers:
+        # Structural validation: hidden sheets and merged cells
+        struct_errors = self._check_hidden_and_merged(ws, expected_sheet_name)
+        if struct_errors:
             staged_import.status = "failed"
             staged_import.validation_summary = {
-                "file_error": f"Missing required columns in header: {', '.join(missing_headers)}"
+                "file_error": "; ".join(struct_errors)
             }
             return
 
+        all_row_cells = list(ws.iter_rows(min_row=1))
+        if not all_row_cells:
+            staged_import.status = "failed"
+            staged_import.validation_summary = {"file_error": f"Worksheet '{expected_sheet_name}' is empty"}
+            return
+
+        # Header validation
+        header_cells = all_row_cells[0]
+        col_index_map, header_errors = self._validate_headers(
+            header_cells=header_cells,
+            expected_columns=PRODUCT_CATALOGUE_COLUMNS,
+            sheet_display_name=expected_sheet_name
+        )
+        if header_errors or not col_index_map:
+            staged_import.status = "failed"
+            staged_import.validation_summary = {
+                "file_error": "; ".join(header_errors)
+            }
+            return
+
+        expected_cols = [c[0] for c in PRODUCT_CATALOGUE_COLUMNS]
         seen_product_ids = set()
         seen_skus = set()
         total_rows = 0
         valid_rows = 0
         error_rows = 0
 
-        for row_idx, row_values in enumerate(rows[1:], start=2):
-            if not any(v is not None and str(v).strip() != '' for v in row_values):
+        for row_idx, row_cells in enumerate(all_row_cells[1:], start=2):
+            # Check if row is hidden
+            is_row_hidden = ws.row_dimensions[row_idx].hidden is True
+
+            # Extract cell values and check for formulas
+            cell_vals = [c.value for c in row_cells]
+            is_empty_row = not any(v is not None and str(v).strip() != "" for v in cell_vals)
+            if is_empty_row:
                 continue
 
             total_rows += 1
-            raw_dict = {}
-            for col_name in expected_cols:
-                idx = col_index_map[col_name.lower()]
-                raw_dict[col_name] = row_values[idx] if idx < len(row_values) else None
-
             row_errors: List[str] = []
             parsed_data: Dict[str, Any] = {}
+            raw_dict: Dict[str, Any] = {}
 
-            # 1. product_id
-            p_id = str(raw_dict.get("product_id") or '').strip()
+            if is_row_hidden:
+                row_errors.append(f"[{expected_sheet_name}] Row {row_idx}: Row is hidden in worksheet. Hidden data cannot be silently imported.")
+
+            for col_name in expected_cols:
+                idx = col_index_map[col_name]
+                if idx < len(row_cells):
+                    cell = row_cells[idx]
+                    val = cell.value
+
+                    # Check if column is hidden
+                    col_letter = get_column_letter(idx + 1)
+                    if ws.column_dimensions[col_letter].hidden is True:
+                        row_errors.append(f"[{expected_sheet_name}] Row {row_idx}, Column '{col_name}': Column {col_letter} is hidden in worksheet. Hidden data is rejected.")
+
+                    # Formula detection
+                    if cell.data_type == "f" or (isinstance(val, str) and val.startswith("=")):
+                        row_errors.append(f"[{expected_sheet_name}] Row {row_idx}, Column '{col_name}': Contains formula ('{val}'). Calculated or formula values must be pasted as plain static values.")
+
+                    # Convert datetime/date to string for JSON serialization
+                    if isinstance(val, datetime):
+                        val = val.strftime("%Y-%m-%d") if val.time() == datetime.min.time() else val.isoformat()
+                    elif isinstance(val, date):
+                        val = val.isoformat()
+                    raw_dict[col_name] = val
+                else:
+                    raw_dict[col_name] = None
+
+            # 1. product_id (Required)
+            p_id = str(raw_dict.get("product_id") or "").strip()
             if not p_id:
-                row_errors.append(f"[Product_Catalogue] Row {row_idx}, Column 'product_id': Unique identifier is required")
+                row_errors.append(f"[{expected_sheet_name}] Row {row_idx}, Column 'product_id': Unique identifier is required")
             elif p_id in seen_product_ids:
-                row_errors.append(f"[Product_Catalogue] Row {row_idx}, Column 'product_id': Duplicate product_id '{p_id}' within this import file")
+                row_errors.append(f"[{expected_sheet_name}] Row {row_idx}, Column 'product_id': Duplicate product_id '{p_id}' within this import file")
             else:
                 seen_product_ids.add(p_id)
             parsed_data["product_id"] = p_id
 
-            # 2. product_name
-            p_name = str(raw_dict.get("product_name") or '').strip()
+            # 2. product_name (Required)
+            p_name = str(raw_dict.get("product_name") or "").strip()
             if not p_name:
-                row_errors.append(f"[Product_Catalogue] Row {row_idx}, Column 'product_name': Product name is required")
+                row_errors.append(f"[{expected_sheet_name}] Row {row_idx}, Column 'product_name': Product name is required")
             parsed_data["product_name"] = p_name
 
-            # 3. product_category
-            p_cat = str(raw_dict.get("product_category") or '').strip()
+            # 3. product_category (Required)
+            p_cat = str(raw_dict.get("product_category") or "").strip()
             if not p_cat:
-                row_errors.append(f"[Product_Catalogue] Row {row_idx}, Column 'product_category': Category is required")
+                row_errors.append(f"[{expected_sheet_name}] Row {row_idx}, Column 'product_category': Category is required")
             parsed_data["product_category"] = p_cat
 
             # 4. offering_type (Required: Physical Product, Service, Digital Product, Subscription)
-            off_type_raw = str(raw_dict.get("offering_type") or '').strip()
+            off_type_raw = str(raw_dict.get("offering_type") or "").strip()
             if not off_type_raw:
-                row_errors.append(f"[Product_Catalogue] Row {row_idx}, Column 'offering_type': offering_type is required. Permitted values: {', '.join(sorted(VALID_OFFERING_TYPES))}")
-                off_type = "Physical Product"
+                row_errors.append(f"[{expected_sheet_name}] Row {row_idx}, Column 'offering_type': offering_type is required. Permitted values: {', '.join(sorted(VALID_OFFERING_TYPES))}")
+                off_type = None
             else:
                 off_type = next((v for v in VALID_OFFERING_TYPES if v.lower() == off_type_raw.lower()), off_type_raw)
                 if off_type not in VALID_OFFERING_TYPES:
-                    row_errors.append(f"[Product_Catalogue] Row {row_idx}, Column 'offering_type': Invalid offering_type '{off_type_raw}'. Permitted: {', '.join(sorted(VALID_OFFERING_TYPES))}")
+                    row_errors.append(f"[{expected_sheet_name}] Row {row_idx}, Column 'offering_type': Invalid offering_type '{off_type_raw}'. Permitted: {', '.join(sorted(VALID_OFFERING_TYPES))}")
             parsed_data["offering_type"] = off_type
 
-            # 5. product_description
-            p_desc = str(raw_dict.get("product_description") or '').strip()
+            # 5. product_description (Required)
+            p_desc = str(raw_dict.get("product_description") or "").strip()
             if not p_desc:
-                row_errors.append(f"[Product_Catalogue] Row {row_idx}, Column 'product_description': Description is required")
+                row_errors.append(f"[{expected_sheet_name}] Row {row_idx}, Column 'product_description': Description is required")
             parsed_data["product_description"] = p_desc
 
-            # 6. variant_name & sku (Product-variant rule: if variant_name provided, sku is required)
-            v_name = str(raw_dict.get("variant_name") or '').strip() or None
-            sku_val = str(raw_dict.get("sku") or '').strip() or None
+            # 6. variant_name & sku
+            v_name = str(raw_dict.get("variant_name") or "").strip() or None
+            sku_val = str(raw_dict.get("sku") or "").strip() or None
 
             if v_name and not sku_val:
-                row_errors.append(f"[Product_Catalogue] Row {row_idx}, Column 'sku': SKU is required when variant_name is specified")
+                row_errors.append(f"[{expected_sheet_name}] Row {row_idx}, Column 'sku': SKU is required when variant_name is specified")
 
             if sku_val:
                 if sku_val in seen_skus:
-                    row_errors.append(f"[Product_Catalogue] Row {row_idx}, Column 'sku': Duplicate SKU '{sku_val}' within this import file")
+                    row_errors.append(f"[{expected_sheet_name}] Row {row_idx}, Column 'sku': Duplicate SKU '{sku_val}' within this import file")
                 else:
                     seen_skus.add(sku_val)
 
@@ -584,37 +719,37 @@ class ExcelImportService:
 
             # 7. pack_size & pack_unit
             pack_size_val = raw_dict.get("pack_size")
-            if pack_size_val is not None and str(pack_size_val).strip() != '':
+            if pack_size_val is not None and str(pack_size_val).strip() != "":
                 try:
                     ps_float = float(pack_size_val)
                     if ps_float <= 0:
-                        row_errors.append(f"[Product_Catalogue] Row {row_idx}, Column 'pack_size': pack_size must be a positive number (> 0), got: '{pack_size_val}'")
+                        row_errors.append(f"[{expected_sheet_name}] Row {row_idx}, Column 'pack_size': pack_size must be a positive number (> 0), got: '{pack_size_val}'")
                         parsed_data["pack_size"] = None
                     else:
                         parsed_data["pack_size"] = ps_float
                 except (ValueError, TypeError):
-                    row_errors.append(f"[Product_Catalogue] Row {row_idx}, Column 'pack_size': Invalid numeric pack_size: '{pack_size_val}'")
+                    row_errors.append(f"[{expected_sheet_name}] Row {row_idx}, Column 'pack_size': Invalid numeric pack_size: '{pack_size_val}'")
                     parsed_data["pack_size"] = None
             else:
                 parsed_data["pack_size"] = None
 
-            parsed_data["pack_unit"] = str(raw_dict.get("pack_unit") or '').strip() or None
-            parsed_data["ingredients_components"] = str(raw_dict.get("ingredients_components") or '').strip() or None
-            parsed_data["key_features"] = str(raw_dict.get("key_features") or '').strip() or None
-            parsed_data["specifications"] = str(raw_dict.get("specifications") or '').strip() or None
-            parsed_data["known_limitations"] = str(raw_dict.get("known_limitations") or '').strip() or None
+            parsed_data["pack_unit"] = str(raw_dict.get("pack_unit") or "").strip() or None
+            parsed_data["ingredients_components"] = str(raw_dict.get("ingredients_components") or "").strip() or None
+            parsed_data["key_features"] = str(raw_dict.get("key_features") or "").strip() or None
+            parsed_data["specifications"] = str(raw_dict.get("specifications") or "").strip() or None
+            parsed_data["known_limitations"] = str(raw_dict.get("known_limitations") or "").strip() or None
 
-            # 8. applicable_market
-            market = str(raw_dict.get("applicable_market") or '').strip()
+            # 8. applicable_market (Required)
+            market = str(raw_dict.get("applicable_market") or "").strip()
             if not market:
-                row_errors.append(f"[Product_Catalogue] Row {row_idx}, Column 'applicable_market': Market is required (specify market or 'ALL')")
+                row_errors.append(f"[{expected_sheet_name}] Row {row_idx}, Column 'applicable_market': Market is required (specify market or 'ALL')")
             parsed_data["applicable_market"] = market
 
-            # 9. record_status
-            status_val_raw = str(raw_dict.get("record_status") or 'Active').strip()
+            # 9. record_status (Required: Active, Inactive, Discontinued)
+            status_val_raw = str(raw_dict.get("record_status") or "Active").strip()
             status_val = next((v for v in VALID_PRODUCT_RECORD_STATUSES if v.lower() == status_val_raw.lower()), status_val_raw)
             if status_val not in VALID_PRODUCT_RECORD_STATUSES:
-                row_errors.append(f"[Product_Catalogue] Row {row_idx}, Column 'record_status': Invalid record_status '{status_val_raw}'. Permitted: {', '.join(sorted(VALID_PRODUCT_RECORD_STATUSES))}")
+                row_errors.append(f"[{expected_sheet_name}] Row {row_idx}, Column 'record_status': Invalid record_status '{status_val_raw}'. Permitted: {', '.join(sorted(VALID_PRODUCT_RECORD_STATUSES))}")
             parsed_data["record_status"] = status_val
 
             is_valid = len(row_errors) == 0
@@ -651,37 +786,49 @@ class ExcelImportService:
         staged_import: StagedImport,
         wb: openpyxl.Workbook
     ):
-        # 1. Sheet 1: Claims_Register
         claims_sheet_name = None
         for name in wb.sheetnames:
             norm_name = name.strip().lower().replace(" ", "_")
-            if norm_name in ("claims_register", "claims", "sheet1"):
+            if norm_name in ("claims_register", "claims"):
                 claims_sheet_name = name
                 break
 
         if not claims_sheet_name:
             staged_import.status = "failed"
             staged_import.validation_summary = {
-                "file_error": f"Required worksheet 'Claims_Register' not found. Sheets present: {wb.sheetnames}"
+                "file_error": f"Required worksheet 'Claims_Register' not found. Worksheets present: {wb.sheetnames}. Please use the exact worksheet name 'Claims_Register'."
             }
             return
 
+        expected_claims_sheet = "Claims_Register"
         ws_claims = wb[claims_sheet_name]
-        claims_rows = list(ws_claims.iter_rows(values_only=True))
-        if not claims_rows or len(claims_rows) < 1:
-            staged_import.status = "failed"
-            staged_import.validation_summary = {"file_error": "Claims_Register worksheet is empty"}
-            return
 
-        header_row = [str(c or '').strip() for c in claims_rows[0]]
-        expected_claims_cols = [c[0] for c in CLAIMS_REGISTER_COLUMNS]
-        col_index_map = {col.lower(): idx for idx, col in enumerate(header_row)}
-
-        missing_headers = [c for c in expected_claims_cols if c.lower() not in col_index_map]
-        if missing_headers:
+        # Check hidden sheet & merged cells
+        struct_errors = self._check_hidden_and_merged(ws_claims, expected_claims_sheet)
+        if struct_errors:
             staged_import.status = "failed"
             staged_import.validation_summary = {
-                "file_error": f"Missing required columns in Claims_Register: {', '.join(missing_headers)}"
+                "file_error": "; ".join(struct_errors)
+            }
+            return
+
+        all_claims_rows = list(ws_claims.iter_rows(min_row=1))
+        if not all_claims_rows:
+            staged_import.status = "failed"
+            staged_import.validation_summary = {"file_error": f"Worksheet '{expected_claims_sheet}' is empty"}
+            return
+
+        # Validate Claims_Register headers
+        header_cells = all_claims_rows[0]
+        col_index_map, header_errors = self._validate_headers(
+            header_cells=header_cells,
+            expected_columns=CLAIMS_REGISTER_COLUMNS,
+            sheet_display_name=expected_claims_sheet
+        )
+        if header_errors or not col_index_map:
+            staged_import.status = "failed"
+            staged_import.validation_summary = {
+                "file_error": "; ".join(header_errors)
             }
             return
 
@@ -703,100 +850,129 @@ class ExcelImportService:
             if p_id:
                 known_product_ids.add(p_id)
 
+        expected_claims_cols = [c[0] for c in CLAIMS_REGISTER_COLUMNS]
         seen_claim_ids = set()
         total_rows = 0
         valid_rows = 0
         error_rows = 0
 
-        for row_idx, row_values in enumerate(claims_rows[1:], start=2):
-            if not any(v is not None and str(v).strip() != '' for v in row_values):
+        for row_idx, row_cells in enumerate(all_claims_rows[1:], start=2):
+            is_row_hidden = ws_claims.row_dimensions[row_idx].hidden is True
+            cell_vals = [c.value for c in row_cells]
+            is_empty_row = not any(v is not None and str(v).strip() != "" for v in cell_vals)
+            if is_empty_row:
                 continue
 
             total_rows += 1
-            raw_dict = {}
-            for col_name in expected_claims_cols:
-                idx = col_index_map[col_name.lower()]
-                raw_dict[col_name] = row_values[idx] if idx < len(row_values) else None
-
             row_errors: List[str] = []
             parsed_data: Dict[str, Any] = {}
+            raw_dict: Dict[str, Any] = {}
 
-            # claim_id
-            c_id = str(raw_dict.get("claim_id") or '').strip()
+            if is_row_hidden:
+                row_errors.append(f"[{expected_claims_sheet}] Row {row_idx}: Row is hidden in worksheet. Hidden data cannot be silently imported.")
+
+            for col_name in expected_claims_cols:
+                idx = col_index_map[col_name]
+                if idx < len(row_cells):
+                    cell = row_cells[idx]
+                    val = cell.value
+
+                    # Check hidden column
+                    col_letter = get_column_letter(idx + 1)
+                    if ws_claims.column_dimensions[col_letter].hidden is True:
+                        row_errors.append(f"[{expected_claims_sheet}] Row {row_idx}, Column '{col_name}': Column {col_letter} is hidden in worksheet. Hidden data is rejected.")
+
+                    # Formula detection
+                    if cell.data_type == "f" or (isinstance(val, str) and val.startswith("=")):
+                        row_errors.append(f"[{expected_claims_sheet}] Row {row_idx}, Column '{col_name}': Contains formula ('{val}'). Calculated or formula values must be pasted as plain static values.")
+
+                    # Convert datetime/date to string for JSON serialization
+                    if isinstance(val, datetime):
+                        val = val.strftime("%Y-%m-%d") if val.time() == datetime.min.time() else val.isoformat()
+                    elif isinstance(val, date):
+                        val = val.isoformat()
+                    raw_dict[col_name] = val
+                else:
+                    raw_dict[col_name] = None
+
+            # claim_id (Required)
+            c_id = str(raw_dict.get("claim_id") or "").strip()
             if not c_id:
-                row_errors.append(f"[Claims_Register] Row {row_idx}, Column 'claim_id': Claim ID is required")
+                row_errors.append(f"[{expected_claims_sheet}] Row {row_idx}, Column 'claim_id': Claim ID is required")
             elif c_id in seen_claim_ids:
-                row_errors.append(f"[Claims_Register] Row {row_idx}, Column 'claim_id': Duplicate claim_id '{c_id}' within this import file")
+                row_errors.append(f"[{expected_claims_sheet}] Row {row_idx}, Column 'claim_id': Duplicate claim_id '{c_id}' within this import file")
             else:
                 seen_claim_ids.add(c_id)
             parsed_data["claim_id"] = c_id
 
-            # claim_text
-            c_text = str(raw_dict.get("claim_text") or '').strip()
+            # claim_text (Required)
+            c_text = str(raw_dict.get("claim_text") or "").strip()
             if not c_text:
-                row_errors.append(f"[Claims_Register] Row {row_idx}, Column 'claim_text': Claim text is required")
+                row_errors.append(f"[{expected_claims_sheet}] Row {row_idx}, Column 'claim_text': Claim text is required")
             parsed_data["claim_text"] = c_text
 
-            # claim_type
-            c_type_raw = str(raw_dict.get("claim_type") or '').strip()
-            normalized_type = next((v for v in VALID_CLAIM_TYPES if v.lower() == c_type_raw.lower()), c_type_raw)
-            if normalized_type not in VALID_CLAIM_TYPES:
-                row_errors.append(f"[Claims_Register] Row {row_idx}, Column 'claim_type': Invalid claim_type '{c_type_raw}'. Permitted: {', '.join(sorted(VALID_CLAIM_TYPES))}")
-            parsed_data["claim_type"] = normalized_type
+            # claim_type (Required: any non-empty string <= 50 chars)
+            c_type_raw = str(raw_dict.get("claim_type") or "").strip()
+            if not c_type_raw:
+                row_errors.append(f"[{expected_claims_sheet}] Row {row_idx}, Column 'claim_type': Claim type is required and cannot be empty or whitespace")
+            elif len(c_type_raw) > 50:
+                row_errors.append(f"[{expected_claims_sheet}] Row {row_idx}, Column 'claim_type': Claim type exceeds maximum length of 50 characters (got {len(c_type_raw)})")
+            else:
+                parsed_data["claim_type"] = c_type_raw
 
-            # claim_status
-            c_status_raw = str(raw_dict.get("claim_status") or '').strip()
+            # claim_status (Required: Approved, Restricted, Prohibited)
+            c_status_raw = str(raw_dict.get("claim_status") or "").strip()
             c_status = next((v for v in VALID_CLAIM_STATUSES if v.lower() == c_status_raw.lower()), c_status_raw)
             if c_status not in VALID_CLAIM_STATUSES:
-                row_errors.append(f"[Claims_Register] Row {row_idx}, Column 'claim_status': Invalid claim_status '{c_status_raw}'. Permitted: {', '.join(sorted(VALID_CLAIM_STATUSES))}")
+                row_errors.append(f"[{expected_claims_sheet}] Row {row_idx}, Column 'claim_status': Invalid claim_status '{c_status_raw}'. Permitted: {', '.join(sorted(VALID_CLAIM_STATUSES))}")
             parsed_data["claim_status"] = c_status
 
-            # applicable_product_id (Validate against active organisation catalogue or 'ALL')
-            app_prod = str(raw_dict.get("applicable_product_id") or '').strip()
+            # applicable_product_id (Required: valid product_id or 'ALL')
+            app_prod = str(raw_dict.get("applicable_product_id") or "").strip()
             if not app_prod:
-                row_errors.append(f"[Claims_Register] Row {row_idx}, Column 'applicable_product_id': Product reference is required (enter product_id or 'ALL')")
+                row_errors.append(f"[{expected_claims_sheet}] Row {row_idx}, Column 'applicable_product_id': Product reference is required (enter product_id or 'ALL')")
             elif app_prod != "ALL" and app_prod not in known_product_ids:
-                row_errors.append(f"[Claims_Register] Row {row_idx}, Column 'applicable_product_id': Referenced product_id '{app_prod}' not found in active organisation catalogue")
+                row_errors.append(f"[{expected_claims_sheet}] Row {row_idx}, Column 'applicable_product_id': Referenced product_id '{app_prod}' not found in active organisation catalogue")
             parsed_data["applicable_product_id"] = app_prod
 
-            # approved_variations & prohibited_variations
-            app_var = str(raw_dict.get("approved_variations") or '').strip() or None
-            proh_var = str(raw_dict.get("prohibited_variations") or '').strip() or None
+            # approved_variations, restricted_conditions, prohibited_variations
+            app_var = str(raw_dict.get("approved_variations") or "").strip() or None
+            proh_var = str(raw_dict.get("prohibited_variations") or "").strip() or None
+            restr_cond = str(raw_dict.get("restricted_conditions") or "").strip() or None
 
             # Conditional Validation:
             # - Restricted claims MUST specify restricted_conditions
-            restr_cond = str(raw_dict.get("restricted_conditions") or '').strip() or None
             if c_status == "Restricted" and not restr_cond:
-                row_errors.append(f"[Claims_Register] Row {row_idx}, Column 'restricted_conditions': Restricted claims must specify 'restricted_conditions'")
+                row_errors.append(f"[{expected_claims_sheet}] Row {row_idx}, Column 'restricted_conditions': Restricted claims must specify 'restricted_conditions'")
 
             # - Prohibited claims CANNOT contain approved_variations (contradiction)
             if c_status == "Prohibited" and app_var:
-                row_errors.append(f"[Claims_Register] Row {row_idx}, Column 'approved_variations': Prohibited claims cannot contain approved_variations (contradiction)")
+                row_errors.append(f"[{expected_claims_sheet}] Row {row_idx}, Column 'approved_variations': Prohibited claims cannot contain approved_variations (contradiction)")
 
             parsed_data["approved_variations"] = app_var
             parsed_data["restricted_conditions"] = restr_cond
             parsed_data["prohibited_variations"] = proh_var
 
-            # applicable_market
-            market = str(raw_dict.get("applicable_market") or '').strip()
+            # applicable_market (Required)
+            market = str(raw_dict.get("applicable_market") or "").strip()
             if not market:
-                row_errors.append(f"[Claims_Register] Row {row_idx}, Column 'applicable_market': Market is required")
+                row_errors.append(f"[{expected_claims_sheet}] Row {row_idx}, Column 'applicable_market': Market is required")
             parsed_data["applicable_market"] = market
 
-            # effective_from
+            # effective_from (Required date)
             eff_from_val = raw_dict.get("effective_from")
             parsed_eff_from = self._parse_date(eff_from_val)
             if not parsed_eff_from:
-                row_errors.append(f"[Claims_Register] Row {row_idx}, Column 'effective_from': Must be a valid date (YYYY-MM-DD), got: '{eff_from_val}'")
+                row_errors.append(f"[{expected_claims_sheet}] Row {row_idx}, Column 'effective_from': Must be a valid date (YYYY-MM-DD), got: '{eff_from_val}'")
             parsed_data["effective_from"] = parsed_eff_from.isoformat() if parsed_eff_from else None
 
             # effective_until (Optional; if present, must be >= effective_from)
             eff_until_val = raw_dict.get("effective_until")
             parsed_eff_until = self._parse_date(eff_until_val) if eff_until_val else None
             if eff_until_val and not parsed_eff_until:
-                row_errors.append(f"[Claims_Register] Row {row_idx}, Column 'effective_until': Must be a valid date (YYYY-MM-DD), got: '{eff_until_val}'")
+                row_errors.append(f"[{expected_claims_sheet}] Row {row_idx}, Column 'effective_until': Must be a valid date (YYYY-MM-DD), got: '{eff_until_val}'")
             elif parsed_eff_from and parsed_eff_until and parsed_eff_until < parsed_eff_from:
-                row_errors.append(f"[Claims_Register] Row {row_idx}, Column 'effective_until': effective_until ({parsed_eff_until}) cannot be earlier than effective_from ({parsed_eff_from})")
+                row_errors.append(f"[{expected_claims_sheet}] Row {row_idx}, Column 'effective_until': effective_until ({parsed_eff_until}) cannot be earlier than effective_from ({parsed_eff_from})")
             parsed_data["effective_until"] = parsed_eff_until.isoformat() if parsed_eff_until else None
 
             is_valid = len(row_errors) == 0
@@ -825,96 +1001,152 @@ class ExcelImportService:
                 disc_sheet_name = name
                 break
 
+        expected_disc_sheet = "Required_Disclosures"
         if disc_sheet_name:
             ws_disc = wb[disc_sheet_name]
-            disc_rows = list(ws_disc.iter_rows(values_only=True))
-            if disc_rows and len(disc_rows) > 1:
-                has_disclosures = True
-                disc_header_row = [str(c or '').strip() for c in disc_rows[0]]
-                disc_col_map = {col.lower(): idx for idx, col in enumerate(disc_header_row)}
-                seen_disc_ids = set()
 
-                for row_idx, row_values in enumerate(disc_rows[1:], start=2):
-                    if not any(v is not None and str(v).strip() != '' for v in row_values):
-                        continue
+            # Check hidden sheet & merged cells
+            disc_struct_errors = self._check_hidden_and_merged(ws_disc, expected_disc_sheet)
+            if disc_struct_errors:
+                staged_import.status = "failed"
+                staged_import.validation_summary = {
+                    "file_error": "; ".join(disc_struct_errors)
+                }
+                return
 
-                    total_rows += 1
-                    raw_dict = {}
-                    for col_name, _, _ in REQUIRED_DISCLOSURES_COLUMNS:
-                        idx = disc_col_map.get(col_name.lower())
-                        raw_dict[col_name] = row_values[idx] if idx is not None and idx < len(row_values) else None
+            all_disc_rows = list(ws_disc.iter_rows(min_row=1))
+            if all_disc_rows and len(all_disc_rows) > 1:
+                # Check if there is actual data beyond header
+                has_non_empty_data = False
+                for r in all_disc_rows[1:]:
+                    if any(c.value is not None and str(c.value).strip() != "" for c in r):
+                        has_non_empty_data = True
+                        break
 
-                    row_errors: List[str] = []
-                    parsed_data: Dict[str, Any] = {}
-
-                    # disclosure_id
-                    d_id = str(raw_dict.get("disclosure_id") or '').strip()
-                    if not d_id:
-                        row_errors.append(f"[Required_Disclosures] Row {row_idx}, Column 'disclosure_id': Disclosure ID is required")
-                    elif d_id in seen_disc_ids:
-                        row_errors.append(f"[Required_Disclosures] Row {row_idx}, Column 'disclosure_id': Duplicate disclosure_id '{d_id}' within this import file")
-                    else:
-                        seen_disc_ids.add(d_id)
-                    parsed_data["disclosure_id"] = d_id
-
-                    # disclosure_text
-                    d_text = str(raw_dict.get("disclosure_text") or '').strip()
-                    if not d_text:
-                        row_errors.append(f"[Required_Disclosures] Row {row_idx}, Column 'disclosure_text': Disclosure text is required")
-                    parsed_data["disclosure_text"] = d_text
-
-                    # applicable_product_id
-                    app_prod = str(raw_dict.get("applicable_product_id") or '').strip()
-                    if not app_prod:
-                        row_errors.append(f"[Required_Disclosures] Row {row_idx}, Column 'applicable_product_id': Product reference is required (enter product_id or 'ALL')")
-                    elif app_prod != "ALL" and app_prod not in known_product_ids:
-                        row_errors.append(f"[Required_Disclosures] Row {row_idx}, Column 'applicable_product_id': Referenced product_id '{app_prod}' not found in active organisation catalogue")
-                    parsed_data["applicable_product_id"] = app_prod
-
-                    # applicable_market
-                    market = str(raw_dict.get("applicable_market") or '').strip()
-                    if not market:
-                        row_errors.append(f"[Required_Disclosures] Row {row_idx}, Column 'applicable_market': Market is required")
-                    parsed_data["applicable_market"] = market
-
-                    # applies_when
-                    app_when = str(raw_dict.get("applies_when") or '').strip()
-                    if not app_when:
-                        row_errors.append(f"[Required_Disclosures] Row {row_idx}, Column 'applies_when': Trigger condition is required")
-                    parsed_data["applies_when"] = app_when
-
-                    # effective_from
-                    eff_from_val = raw_dict.get("effective_from")
-                    parsed_eff_from = self._parse_date(eff_from_val)
-                    if not parsed_eff_from:
-                        row_errors.append(f"[Required_Disclosures] Row {row_idx}, Column 'effective_from': Must be a valid date (YYYY-MM-DD), got: '{eff_from_val}'")
-                    parsed_data["effective_from"] = parsed_eff_from.isoformat() if parsed_eff_from else None
-
-                    # effective_until
-                    eff_until_val = raw_dict.get("effective_until")
-                    parsed_eff_until = self._parse_date(eff_until_val) if eff_until_val else None
-                    if eff_until_val and not parsed_eff_until:
-                        row_errors.append(f"[Required_Disclosures] Row {row_idx}, Column 'effective_until': Must be a valid date (YYYY-MM-DD), got: '{eff_until_val}'")
-                    elif parsed_eff_from and parsed_eff_until and parsed_eff_until < parsed_eff_from:
-                        row_errors.append(f"[Required_Disclosures] Row {row_idx}, Column 'effective_until': effective_until ({parsed_eff_until}) cannot be earlier than effective_from ({parsed_eff_from})")
-                    parsed_data["effective_until"] = parsed_eff_until.isoformat() if parsed_eff_until else None
-
-                    is_valid = len(row_errors) == 0
-                    if is_valid:
-                        valid_rows += 1
-                    else:
-                        error_rows += 1
-
-                    staged_disc = StagedImportDisclosureRow(
-                        organization_id=org_id,
-                        import_id=staged_import.id,
-                        row_number=row_idx,
-                        raw_data=raw_dict,
-                        parsed_data=parsed_data,
-                        validation_errors=row_errors,
-                        is_valid=is_valid
+                if has_non_empty_data:
+                    has_disclosures = True
+                    disc_header_cells = all_disc_rows[0]
+                    disc_col_map, disc_header_errors = self._validate_headers(
+                        header_cells=disc_header_cells,
+                        expected_columns=REQUIRED_DISCLOSURES_COLUMNS,
+                        sheet_display_name=expected_disc_sheet
                     )
-                    db.add(staged_disc)
+                    if disc_header_errors or not disc_col_map:
+                        staged_import.status = "failed"
+                        staged_import.validation_summary = {
+                            "file_error": "; ".join(disc_header_errors)
+                        }
+                        return
+
+                    seen_disc_ids = set()
+
+                    for row_idx, row_cells in enumerate(all_disc_rows[1:], start=2):
+                        is_row_hidden = ws_disc.row_dimensions[row_idx].hidden is True
+                        cell_vals = [c.value for c in row_cells]
+                        is_empty_row = not any(v is not None and str(v).strip() != "" for v in cell_vals)
+                        if is_empty_row:
+                            continue
+
+                        total_rows += 1
+                        raw_dict = {}
+                        row_errors: List[str] = []
+                        parsed_data: Dict[str, Any] = {}
+
+                        if is_row_hidden:
+                            row_errors.append(f"[{expected_disc_sheet}] Row {row_idx}: Row is hidden in worksheet. Hidden data cannot be silently imported.")
+
+                        for col_name, _, _ in REQUIRED_DISCLOSURES_COLUMNS:
+                            idx = disc_col_map[col_name]
+                            if idx < len(row_cells):
+                                cell = row_cells[idx]
+                                val = cell.value
+
+                                # Check hidden column
+                                col_letter = get_column_letter(idx + 1)
+                                if ws_disc.column_dimensions[col_letter].hidden is True:
+                                    row_errors.append(f"[{expected_disc_sheet}] Row {row_idx}, Column '{col_name}': Column {col_letter} is hidden in worksheet. Hidden data is rejected.")
+
+                                # Formula detection
+                                if cell.data_type == "f" or (isinstance(val, str) and val.startswith("=")):
+                                    row_errors.append(f"[{expected_disc_sheet}] Row {row_idx}, Column '{col_name}': Contains formula ('{val}'). Calculated or formula values must be pasted as plain static values.")
+
+                                # Convert datetime/date to string for JSON serialization
+                                if isinstance(val, datetime):
+                                    val = val.strftime("%Y-%m-%d") if val.time() == datetime.min.time() else val.isoformat()
+                                elif isinstance(val, date):
+                                    val = val.isoformat()
+                                raw_dict[col_name] = val
+                            else:
+                                raw_dict[col_name] = None
+
+                        # disclosure_id (Required)
+                        d_id = str(raw_dict.get("disclosure_id") or "").strip()
+                        if not d_id:
+                            row_errors.append(f"[{expected_disc_sheet}] Row {row_idx}, Column 'disclosure_id': Disclosure ID is required")
+                        elif d_id in seen_disc_ids:
+                            row_errors.append(f"[{expected_disc_sheet}] Row {row_idx}, Column 'disclosure_id': Duplicate disclosure_id '{d_id}' within this import file")
+                        else:
+                            seen_disc_ids.add(d_id)
+                        parsed_data["disclosure_id"] = d_id
+
+                        # disclosure_text (Required)
+                        d_text = str(raw_dict.get("disclosure_text") or "").strip()
+                        if not d_text:
+                            row_errors.append(f"[{expected_disc_sheet}] Row {row_idx}, Column 'disclosure_text': Disclosure text is required")
+                        parsed_data["disclosure_text"] = d_text
+
+                        # applicable_product_id (Required)
+                        app_prod = str(raw_dict.get("applicable_product_id") or "").strip()
+                        if not app_prod:
+                            row_errors.append(f"[{expected_disc_sheet}] Row {row_idx}, Column 'applicable_product_id': Product reference is required (enter product_id or 'ALL')")
+                        elif app_prod != "ALL" and app_prod not in known_product_ids:
+                            row_errors.append(f"[{expected_disc_sheet}] Row {row_idx}, Column 'applicable_product_id': Referenced product_id '{app_prod}' not found in active organisation catalogue")
+                        parsed_data["applicable_product_id"] = app_prod
+
+                        # applicable_market (Required)
+                        market = str(raw_dict.get("applicable_market") or "").strip()
+                        if not market:
+                            row_errors.append(f"[{expected_disc_sheet}] Row {row_idx}, Column 'applicable_market': Market is required")
+                        parsed_data["applicable_market"] = market
+
+                        # applies_when (Required)
+                        app_when = str(raw_dict.get("applies_when") or "").strip()
+                        if not app_when:
+                            row_errors.append(f"[{expected_disc_sheet}] Row {row_idx}, Column 'applies_when': Trigger condition is required")
+                        parsed_data["applies_when"] = app_when
+
+                        # effective_from (Required date)
+                        eff_from_val = raw_dict.get("effective_from")
+                        parsed_eff_from = self._parse_date(eff_from_val)
+                        if not parsed_eff_from:
+                            row_errors.append(f"[{expected_disc_sheet}] Row {row_idx}, Column 'effective_from': Must be a valid date (YYYY-MM-DD), got: '{eff_from_val}'")
+                        parsed_data["effective_from"] = parsed_eff_from.isoformat() if parsed_eff_from else None
+
+                        # effective_until (Optional; if present, must be >= effective_from)
+                        eff_until_val = raw_dict.get("effective_until")
+                        parsed_eff_until = self._parse_date(eff_until_val) if eff_until_val else None
+                        if eff_until_val and not parsed_eff_until:
+                            row_errors.append(f"[{expected_disc_sheet}] Row {row_idx}, Column 'effective_until': Must be a valid date (YYYY-MM-DD), got: '{eff_until_val}'")
+                        elif parsed_eff_from and parsed_eff_until and parsed_eff_until < parsed_eff_from:
+                            row_errors.append(f"[{expected_disc_sheet}] Row {row_idx}, Column 'effective_until': effective_until ({parsed_eff_until}) cannot be earlier than effective_from ({parsed_eff_from})")
+                        parsed_data["effective_until"] = parsed_eff_until.isoformat() if parsed_eff_until else None
+
+                        is_valid = len(row_errors) == 0
+                        if is_valid:
+                            valid_rows += 1
+                        else:
+                            error_rows += 1
+
+                        staged_disc = StagedImportDisclosureRow(
+                            organization_id=org_id,
+                            import_id=staged_import.id,
+                            row_number=row_idx,
+                            raw_data=raw_dict,
+                            parsed_data=parsed_data,
+                            validation_errors=row_errors,
+                            is_valid=is_valid
+                        )
+                        db.add(staged_disc)
 
         staged_import.has_disclosures = has_disclosures
         staged_import.total_rows = total_rows
@@ -1184,7 +1416,7 @@ class ExcelImportService:
         s = str(val).strip()
         if not s:
             return None
-        for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%Y/%m/%d"):
+        for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%Y/%m/%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"):
             try:
                 return datetime.strptime(s, fmt).date()
             except ValueError:

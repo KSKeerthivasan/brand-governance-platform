@@ -55,16 +55,16 @@ class Claim(Base):
             name="chk_claim_product_applicability",
         ),
         CheckConstraint(
-            "claim_type IN ('Ingredient', 'Nutritional', 'Health', 'Performance', 'Quality', 'Comparative', 'Environmental', 'Endorsement', 'Origin', 'Safety', 'Other')",
-            name="chk_claim_type",
-        ),
-        CheckConstraint(
             "claim_status IN ('Approved', 'Restricted', 'Prohibited')",
             name="chk_claim_status",
         ),
         CheckConstraint(
             "(claim_status <> 'Restricted') OR (restricted_conditions IS NOT NULL AND length(trim(restricted_conditions)) > 0)",
             name="chk_claim_restricted_condition",
+        ),
+        CheckConstraint(
+            "length(trim(claim_type)) > 0",
+            name="chk_claim_type_not_empty",
         ),
     )
 

@@ -12,6 +12,7 @@ from app.services.image_governance import image_governance
 from app.services.ocr_service import ocr_service, OCRResult
 from app.services.pdf_service import pdf_service, PDFValidationError, PDFRenderError
 from app.services.storage import storage_service
+from app.services.knowledge_resolver import resolve_knowledge_base, ResolvedKnowledgeBase
 
 # Fallback canonical products mapping for backward compatibility
 CANONICAL_PRODUCTS: Dict[str, List[str]] = {
@@ -184,15 +185,17 @@ class GovernanceEngine:
         product_id: Optional[str],
         ocr_result: Optional[OCRResult] = None,
         brand_name: str = "Brand",
-        page_number: Optional[int] = None
+        page_number: Optional[int] = None,
+        resolved_kb: Optional[ResolvedKnowledgeBase] = None
     ) -> Tuple[List[GovernanceFinding], int]:
         findings: List[GovernanceFinding] = []
         if not org_id:
             return findings, 0
 
         today = date.today()
-        claims = db.query(Claim).filter(Claim.organization_id == org_id).all()
-        disclosures = db.query(RequiredDisclosure).filter(RequiredDisclosure.organization_id == org_id).all()
+        kb = resolved_kb or resolve_knowledge_base(db, org_id)
+        claims = kb.claims
+        disclosures = kb.required_disclosures
         claims_evaluated_count = len(claims) + len(disclosures)
 
         # -------------------------------------------------------------
@@ -473,7 +476,8 @@ class GovernanceEngine:
         db: Session,
         content_version: ContentVersion,
         executed_by_user_id: Optional[str] = None,
-        product_id: Optional[str] = None
+        product_id: Optional[str] = None,
+        knowledge_base_version_id: Optional[str] = None
     ) -> GovernanceRun:
         body_text = content_version.body_text or ""
         content_item = content_version.content_item
@@ -484,6 +488,15 @@ class GovernanceEngine:
         if not product_id and content_item and content_item.product_id:
             product_id = content_item.product_id
         now = datetime.utcnow()
+        resolved_kb = resolve_knowledge_base(db, org_id, target_version_id=knowledge_base_version_id)
+        kb_version_id = resolved_kb.version_id
+        baseline_status = resolved_kb.baseline_status
+        brand_profile = resolved_kb.brand_profile
+        brand_name = brand_profile.brand_name if brand_profile else "Brand"
+        org_products = resolved_kb.active_products
+        approved_rules = resolved_kb.rules
+        approved_facts = resolved_kb.facts
+        unapproved_facts = resolved_kb.unapproved_facts
 
         findings: List[GovernanceFinding] = []
 
@@ -512,7 +525,10 @@ class GovernanceEngine:
                 brand_id=brand_id,
                 org_id=org_id,
                 executed_by_user_id=executed_by_user_id,
-                product_id=product_id
+                product_id=product_id,
+                resolved_kb=resolved_kb
+
+
             )
 
         # ==========================================
@@ -566,22 +582,7 @@ class GovernanceEngine:
                     status="unresolved"
                 ))
 
-        # Resolve active knowledge base version, brand profile, and products for this organization
-        active_kb = db.query(OrganizationActiveKnowledgeBase).filter(
-            OrganizationActiveKnowledgeBase.organization_id == org_id
-        ).first() if org_id else None
-        kb_version_id = active_kb.active_version_id if active_kb else None
-        baseline_status = "versioned" if kb_version_id else "legacy_unversioned"
-
-        brand_profile = db.query(BrandProfile).filter(
-            BrandProfile.organization_id == org_id
-        ).first() if org_id else None
-        brand_name = brand_profile.brand_name if brand_profile else "Brand"
-
-        org_products = db.query(Product).filter(
-            Product.organization_id == org_id,
-            Product.record_status == "Active"
-        ).all() if org_id else []
+        # Baseline status, brand profile, and active products resolved via resolved_kb above
 
         # Typography Hierarchy Heuristic Evaluation (Milestone 5 / Round 3 Input 1 Section D)
         if ocr_result and getattr(ocr_result, "regions", None) and len(ocr_result.regions) >= 2:
@@ -658,39 +659,7 @@ class GovernanceEngine:
         detected_products = self.detect_product_context(combined_source_text, title, product_id, products=org_products)
         is_corporate_content = len(detected_products) == 0
 
-        # Step 2: Query active approved rules
-        active_kb = db.query(OrganizationActiveKnowledgeBase).filter(
-            OrganizationActiveKnowledgeBase.organization_id == org_id
-        ).first() if org_id else None
-        kb_version_id = active_kb.active_version_id if active_kb else None
-        baseline_status = "versioned" if kb_version_id else "legacy_unversioned"
-
-        brand_profile = db.query(BrandProfile).filter(
-            BrandProfile.organization_id == org_id
-        ).first() if org_id else None
-        brand_name = brand_profile.brand_name if brand_profile else "Brand"
-
-        org_products = db.query(Product).filter(
-            Product.organization_id == org_id,
-            Product.record_status == "Active"
-        ).all() if org_id else []
-
-        approved_rules = db.query(KnowledgeRule).filter(
-            KnowledgeRule.organization_id == org_id,
-            KnowledgeRule.status == "approved"
-        ).all()
-
-        # Step 3: Query product facts (approved)
-        approved_facts = db.query(KnowledgeFact).filter(
-            KnowledgeFact.organization_id == org_id,
-            KnowledgeFact.status == "approved"
-        ).all()
-
-        # Step 4: Query unapproved facts (pending, expired, rejected)
-        unapproved_facts = db.query(KnowledgeFact).filter(
-            KnowledgeFact.organization_id == org_id,
-            KnowledgeFact.status.in_(["pending_review", "rejected", "expired"])
-        ).all()
+        # Step 2: Approved rules and facts resolved via resolved_kb above
 
         rules_evaluated_count = 0
         facts_evaluated_count = 0
@@ -1181,7 +1150,8 @@ class GovernanceEngine:
             detected_products=detected_products,
             product_id=product_id,
             ocr_result=ocr_result,
-            brand_name=brand_name
+            brand_name=brand_name,
+            resolved_kb=resolved_kb
         )
         findings.extend(claim_findings)
         facts_evaluated_count += claims_count
@@ -1198,7 +1168,8 @@ class GovernanceEngine:
                 org_id=org_id,
                 db=db,
                 brand_id=brand_id,
-                ocr_result=ocr_result
+                ocr_result=ocr_result,
+                resolved_kb=resolved_kb
             )
             findings.extend(visual_findings)
 
@@ -1262,41 +1233,25 @@ class GovernanceEngine:
         brand_id: Optional[str],
         org_id: Optional[str],
         executed_by_user_id: Optional[str],
-        product_id: Optional[str]
+        product_id: Optional[str],
+        knowledge_base_version_id: Optional[str] = None,
+        resolved_kb: Optional[ResolvedKnowledgeBase] = None
     ) -> GovernanceRun:
         """
         Executes end-to-end governance checks on a multi-page PDF creative asset.
         Evaluates each page locally, maps findings to specific page numbers, checks
         document-level disclosures, and persists an immutable GovernanceRun.
         """
-        active_kb = db.query(OrganizationActiveKnowledgeBase).filter(
-            OrganizationActiveKnowledgeBase.organization_id == org_id
-        ).first() if org_id else None
-        kb_version_id = active_kb.active_version_id if active_kb else None
-        baseline_status = "versioned" if kb_version_id else "legacy_unversioned"
-
-        brand_profile = db.query(BrandProfile).filter(
-            BrandProfile.organization_id == org_id
-        ).first() if org_id else None
+        if not resolved_kb:
+            resolved_kb = resolve_knowledge_base(db, org_id, target_version_id=knowledge_base_version_id)
+        kb_version_id = resolved_kb.version_id
+        baseline_status = resolved_kb.baseline_status
+        brand_profile = resolved_kb.brand_profile
         brand_name = brand_profile.brand_name if brand_profile else "Brand"
-
-        org_products = db.query(Product).filter(
-            Product.organization_id == org_id,
-            Product.record_status == "Active"
-        ).all() if org_id else []
-
-        approved_rules = db.query(KnowledgeRule).filter(
-            KnowledgeRule.organization_id == org_id,
-            KnowledgeRule.status == "approved"
-        ).all()
-        approved_facts = db.query(KnowledgeFact).filter(
-            KnowledgeFact.organization_id == org_id,
-            KnowledgeFact.status == "approved"
-        ).all()
-        unapproved_facts = db.query(KnowledgeFact).filter(
-            KnowledgeFact.organization_id == org_id,
-            KnowledgeFact.status.in_(["pending_review", "rejected", "expired"])
-        ).all()
+        org_products = resolved_kb.active_products
+        approved_rules = resolved_kb.rules
+        approved_facts = resolved_kb.facts
+        unapproved_facts = resolved_kb.unapproved_facts
 
         pdf_findings, rules_count, facts_count = self._evaluate_pdf_creative_version(
             db=db,
@@ -1309,7 +1264,8 @@ class GovernanceEngine:
             approved_rules=approved_rules,
             approved_facts=approved_facts,
             unapproved_facts=unapproved_facts,
-            product_id=product_id
+            product_id=product_id,
+            resolved_kb=resolved_kb
         )
 
         findings: List[GovernanceFinding] = list(pdf_findings)
@@ -1322,7 +1278,10 @@ class GovernanceEngine:
                 approved_facts=approved_facts,
                 unapproved_facts=unapproved_facts,
                 title=title,
-                product_id=product_id
+                product_id=product_id,
+                resolved_kb=resolved_kb
+
+
             )
             findings.extend(caption_findings)
 
@@ -1373,10 +1332,11 @@ class GovernanceEngine:
         body_text: str,
         brand_id: Optional[str],
         org_id: Optional[str],
-        approved_rules: List[KnowledgeRule],
-        approved_facts: List[KnowledgeFact],
-        unapproved_facts: List[KnowledgeFact],
-        product_id: Optional[str]
+        approved_rules: List[Any],
+        approved_facts: List[Any],
+        unapproved_facts: List[Any],
+        product_id: Optional[str],
+        resolved_kb: Optional[ResolvedKnowledgeBase] = None
     ) -> Tuple[List[GovernanceFinding], int, int]:
         all_findings: List[GovernanceFinding] = []
         rules_eval_count = 0
@@ -1702,7 +1662,8 @@ class GovernanceEngine:
                 db=db,
                 brand_id=brand_id,
                 ocr_result=page_ocr_res,
-                page_number=page_num
+                page_number=page_num,
+                resolved_kb=resolved_kb
             )
             page_findings.extend(visual_findings)
 
@@ -1800,11 +1761,13 @@ class GovernanceEngine:
         self,
         body_text: str,
         channel: str,
-        approved_rules: List[KnowledgeRule],
-        approved_facts: List[KnowledgeFact],
-        unapproved_facts: List[KnowledgeFact],
+        approved_rules: List[Any],
+        approved_facts: List[Any],
+        unapproved_facts: List[Any],
         title: str,
-        product_id: Optional[str]
+        product_id: Optional[str],
+        brand_name: str = "Brand",
+        resolved_kb: Optional[ResolvedKnowledgeBase] = None
     ) -> List[GovernanceFinding]:
         findings: List[GovernanceFinding] = []
         detected_prods = self.detect_product_context(f"{title} {body_text}", title, product_id)

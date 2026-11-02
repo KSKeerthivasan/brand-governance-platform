@@ -65,6 +65,8 @@ class GovernanceRunRequest(BaseModel):
 class GovernanceRunOut(BaseModel):
     id: str
     content_version_id: str
+    knowledge_base_version_id: Optional[str] = None
+    baseline_status: Optional[str] = None
     executed_by: Optional[str] = None
     overall_status: str
     rules_evaluated_count: int

@@ -164,7 +164,8 @@ class ImageGovernanceService:
         db: Session,
         brand_id: Optional[str] = None,
         ocr_result: Optional[OCRResult] = None,
-        page_number: Optional[int] = None
+        page_number: Optional[int] = None,
+        resolved_kb: Optional[Any] = None
     ) -> List[GovernanceFinding]:
         """
         Executes unified, deterministic visual checks on an advertisement poster.
@@ -257,7 +258,7 @@ class ImageGovernanceService:
             # CHECK 2: Dominant-Colour Analysis against Approved Palette
             # -------------------------------------------------------------
             dominant_colors = self._extract_dominant_colors(file_path, k=5)
-            approved_colors, color_rule = self._get_approved_brand_colors(db, org_id, brand_id)
+            approved_colors, color_rule = self._get_approved_brand_colors(db, org_id, brand_id, resolved_kb=resolved_kb)
 
             if not approved_colors:
                 findings.append(GovernanceFinding(
@@ -321,7 +322,7 @@ class ImageGovernanceService:
             # -------------------------------------------------------------
             # CHECK 4: Logo Matching against Uploaded Brand Logo Asset
             # -------------------------------------------------------------
-            logo_asset, logo_rule = self._find_approved_logo_asset(db, org_id, brand_id)
+            logo_asset, logo_rule = self._find_approved_logo_asset(db, org_id, brand_id, resolved_kb=resolved_kb)
             from app.services.storage import storage_service
             if not logo_asset or not storage_service.check_exists(logo_asset.file_path):
                 findings.append(GovernanceFinding(
@@ -470,13 +471,31 @@ class ImageGovernanceService:
             return []
 
     def _get_approved_brand_colors(
-        self, db: Session, org_id: str, brand_id: Optional[str] = None
+        self, db: Session, org_id: str, brand_id: Optional[str] = None, resolved_kb: Optional[Any] = None
     ) -> Tuple[List[Tuple[str, str, Tuple[int, int, int]]], Optional[KnowledgeRule]]:
         """
         Finds explicitly approved brand colors from approved rules and facts for the organization and brand.
         Returns list of (color_name, hex_code, (r, g, b)), plus supporting rule.
         Strictly multi-tenant: Returns an empty list if no approved colors exist (never falls back to hardcoded defaults).
         """
+        if resolved_kb and getattr(resolved_kb, "baseline_status", None) == "versioned":
+            colors = []
+            for c in getattr(resolved_kb, "brand_colors", []):
+                norm_hex = getattr(c, "hex_value", "").upper()
+                if not norm_hex:
+                    continue
+                name = getattr(c, "colour_name", None) or f"Approved Brand Color ({norm_hex})"
+                rgb = (getattr(c, "rgb_r", 0), getattr(c, "rgb_g", 0), getattr(c, "rgb_b", 0))
+                if not any(existing[1] == norm_hex for existing in colors):
+                    colors.append((name, norm_hex, rgb))
+
+            supporting_rule = None
+            for r in getattr(resolved_kb, "rules", []):
+                if any(k in f"{r.title} {r.explanation}".lower() for k in ["color", "colour", "palette"]):
+                    supporting_rule = r
+                    break
+            return colors, supporting_rule
+
         rule_query = db.query(KnowledgeRule).filter(
             KnowledgeRule.organization_id == org_id,
             KnowledgeRule.status == "approved"
@@ -1036,12 +1055,31 @@ class ImageGovernanceService:
         return calculate_relative_luminance(rgb)
 
     def _find_approved_logo_asset(
-        self, db: Session, org_id: str, brand_id: Optional[str] = None
-    ) -> Tuple[Optional[BrandAsset], Optional[KnowledgeRule]]:
+        self, db: Session, org_id: str, brand_id: Optional[str] = None, resolved_kb: Optional[Any] = None
+    ) -> Tuple[Optional[Any], Optional[Any]]:
         """
         Finds an official APPROVED logo BrandAsset and any corresponding rule for the organization and brand.
         Only records with status='approved' are used.
         """
+        if resolved_kb and getattr(resolved_kb, "baseline_status", None) == "versioned":
+            logo_asset = None
+            for a in getattr(resolved_kb, "brand_assets", []):
+                if getattr(a, "asset_type", "") == "logo":
+                    logo_asset = a
+                    break
+            if not logo_asset:
+                for a in getattr(resolved_kb, "brand_assets", []):
+                    if "logo" in getattr(a, "asset_name", "").lower():
+                        logo_asset = a
+                        break
+
+            logo_rule = None
+            for r in getattr(resolved_kb, "rules", []):
+                if "logo" in getattr(r, "title", "").lower() or "logo" in getattr(r, "pattern", "").lower():
+                    logo_rule = r
+                    break
+            return logo_asset, logo_rule
+
         asset_query = db.query(BrandAsset).filter(
             BrandAsset.organization_id == org_id,
             BrandAsset.status == "approved",

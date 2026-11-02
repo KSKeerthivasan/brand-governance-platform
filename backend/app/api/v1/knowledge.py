@@ -36,6 +36,7 @@ from app.schemas.knowledge import (
 from app.services.excel_service import excel_service
 from app.services.rescore_service import rescore_service
 from app.services.storage import storage_service
+from app.services.knowledge_resolver import resolve_knowledge_base
 from app.services.extraction import extract_pdf_text_and_candidates, extract_image_metadata
 from app.services.evidence_validator import extract_pdf_pages
 from app.services.gemini_extractor import GeminiConfigurationError, GeminiExtractionError
@@ -1383,6 +1384,14 @@ def activate_knowledge_base(
         BrandAsset.organization_id == org_id,
         BrandAsset.status == "approved"
     ).all()
+    rules = db.query(KnowledgeRule).filter(
+        KnowledgeRule.organization_id == org_id,
+        KnowledgeRule.status == "approved"
+    ).all()
+    facts = db.query(KnowledgeFact).filter(
+        KnowledgeFact.organization_id == org_id,
+        KnowledgeFact.status == "approved"
+    ).all()
 
     # Determine next version number
     latest_ver = db.query(KnowledgeBaseVersion).filter(
@@ -1421,9 +1430,47 @@ def activate_knowledge_base(
             "restricted_conditions": c.restricted_conditions,
             "prohibited_variations": c.prohibited_variations,
             "approved_variations": c.approved_variations,
-            "market": c.applicable_market
+            "market": c.applicable_market,
+            "effective_from": str(c.effective_from) if c.effective_from else None,
+            "effective_until": str(c.effective_until) if c.effective_until else None
         }
         for c in claims
+    ]
+    rules_snapshot = [
+        {
+            "id": r.id,
+            "rule_code": r.rule_code,
+
+            "rule_type": r.rule_type,
+            "severity": r.severity,
+            "title": r.title,
+            "explanation": r.explanation,
+            "pattern": r.pattern,
+            "examples_good": r.examples_good,
+            "examples_bad": r.examples_bad,
+            "source_citation": r.source_citation,
+            "scope": r.scope,
+            "status": r.status,
+            "brand_id": r.brand_id,
+            "recommended_alternatives": getattr(r, "recommended_alternatives", None)
+        }
+        for r in rules
+    ]
+    facts_snapshot = [
+        {
+            "id": f.id,
+            "product_id": f.product_id,
+            "category": f.category,
+            "product_name": f.product_name,
+            "fact_key": f.fact_key,
+            "fact_value": f.fact_value,
+            "status": f.status,
+            "valid_from": str(f.valid_from) if f.valid_from else None,
+            "valid_until": str(f.valid_until) if f.valid_until else None,
+            "source_citation": f.source_citation,
+            "brand_id": f.brand_id
+        }
+        for f in facts
     ]
     disclosures_snapshot = [
         {
@@ -1478,6 +1525,8 @@ def activate_knowledge_base(
         "claims": claims_snapshot,
         "required_disclosures": disclosures_snapshot,
         "brand_assets": assets_snapshot,
+        "rules": rules_snapshot,
+        "facts": facts_snapshot,
         "activated_at": datetime.utcnow().isoformat(),
         "activated_by": current_user.id
     }
@@ -1648,19 +1697,12 @@ def live_check_content(
     if not text:
         return LiveCheckResponse(status="clean", infractions=[], total_infractions=0)
 
-    # 1. Fetch active approved rules
-    rules = db.query(KnowledgeRule).filter(
-        KnowledgeRule.organization_id == org_id,
-        KnowledgeRule.status == "approved"
-    ).all()
-
-    # 2. Fetch active brand profile
-    profile = db.query(BrandProfile).filter(BrandProfile.organization_id == org_id).first()
+    resolved_kb = resolve_knowledge_base(db, org_id)
+    rules = resolved_kb.rules
+    profile = resolved_kb.brand_profile
     brand_name = profile.brand_name if profile else "Brand"
-
-    # 3. Fetch active claims & disclosures
-    claims = db.query(Claim).filter(Claim.organization_id == org_id).all()
-    disclosures = db.query(RequiredDisclosure).filter(RequiredDisclosure.organization_id == org_id).all()
+    claims = resolved_kb.claims
+    disclosures = resolved_kb.required_disclosures
 
     infractions: List[LiveInfraction] = []
 
@@ -1730,12 +1772,18 @@ def live_check_content(
     # Check Required Disclosures for selected product or ALL
     prod_code = None
     if req.product_id:
-        selected_prod = db.query(Product).filter(
-            Product.organization_id == org_id,
-            Product.id == req.product_id
-        ).first()
+        selected_prod = None
+        for p in resolved_kb.products:
+            if getattr(p, "id", None) == req.product_id or getattr(p, "product_id", None) == req.product_id:
+                selected_prod = p
+                break
+        if not selected_prod and resolved_kb.baseline_status == "legacy_unversioned":
+            selected_prod = db.query(Product).filter(
+                Product.organization_id == org_id,
+                Product.id == req.product_id
+            ).first()
         if selected_prod:
-            prod_code = selected_prod.product_id
+            prod_code = getattr(selected_prod, "product_id", None)
 
     for disc in disclosures:
         if disc.applicable_product_id in ("ALL", prod_code):
