@@ -47,13 +47,26 @@ class OCRService:
         Safely handles missing, corrupt, unsupported, or textless images.
         """
         t0 = time.time()
+        MAX_OCR_DIM = 1800
+        scale = 1.0
 
         if isinstance(file_path_or_image, Image.Image):
+            pil_img = file_path_or_image
+            w, h = pil_img.size
+            max_dim = max(w, h)
+            if max_dim > MAX_OCR_DIM:
+                scale = MAX_OCR_DIM / float(max_dim)
+                new_w, new_h = max(1, int(w * scale)), max(1, int(h * scale))
+                resized_pil = pil_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            else:
+                resized_pil = pil_img
+
             try:
-                rgb_img = file_path_or_image.convert("RGB")
-                img_array = np.array(rgb_img)
+                import cv2
+                # RapidOCR expects BGR format when passing a numpy array
+                bgr_array = cv2.cvtColor(np.array(resized_pil.convert("RGB")), cv2.COLOR_RGB2BGR)
                 engine = self._get_engine()
-                raw_result, elapse = engine(img_array)
+                raw_result, elapse = engine(bgr_array)
             except Exception as e:
                 return OCRResult(
                     status="failed",
@@ -77,9 +90,10 @@ class OCRService:
                     latency_ms=(time.time() - t0) * 1000
                 )
 
-            # Validate that image can be opened by PIL (corrupt file check)
+            # Validate image and inspect dimensions
             try:
                 with Image.open(file_path) as img:
+                    w, h = img.size
                     img.verify()
             except Exception as e:
                 return OCRResult(
@@ -88,10 +102,18 @@ class OCRService:
                     latency_ms=(time.time() - t0) * 1000
                 )
 
-            # Run OCR inference
+            max_dim = max(w, h)
             try:
                 engine = self._get_engine()
-                raw_result, elapse = engine(file_path)
+                if max_dim > MAX_OCR_DIM:
+                    import cv2
+                    scale = MAX_OCR_DIM / float(max_dim)
+                    cv_img = cv2.imread(file_path)
+                    new_w, new_h = max(1, int(w * scale)), max(1, int(h * scale))
+                    resized = cv2.resize(cv_img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+                    raw_result, elapse = engine(resized)
+                else:
+                    raw_result, elapse = engine(file_path)
             except Exception as e:
                 return OCRResult(
                     status="failed",
@@ -119,10 +141,14 @@ class OCRService:
                 bbox, text, score = item[0], item[1], float(item[2])
                 cleaned_text = str(text).strip()
                 if cleaned_text:
+                    if scale != 1.0:
+                        scaled_bbox = [[float(c[0]) / scale, float(c[1]) / scale] for c in bbox]
+                    else:
+                        scaled_bbox = bbox
                     regions.append(OCRRegion(
                         text=cleaned_text,
                         confidence=score,
-                        bbox=bbox
+                        bbox=scaled_bbox
                     ))
                     text_lines.append(cleaned_text)
                     confidences.append(score)

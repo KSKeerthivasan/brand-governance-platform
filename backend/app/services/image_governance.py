@@ -30,6 +30,14 @@ def calculate_relative_luminance(rgb: Union[Tuple[int, int, int], List[int], np.
     b_lin = srgb_to_linear(float(rgb[2]) / 255.0)
     return 0.2126 * r_lin + 0.7152 * g_lin + 0.0722 * b_lin
 
+def calculate_relative_luminance_array(rgb_pixels: np.ndarray) -> np.ndarray:
+    """
+    Vectorized WCAG 2.1 relative luminance calculation for an array of RGB pixels (N, 3).
+    """
+    norm = np.asarray(rgb_pixels, dtype=np.float32) / 255.0
+    linear = np.where(norm <= 0.04045, norm / 12.92, ((norm + 0.055) / 1.055) ** 2.4)
+    return 0.2126 * linear[:, 0] + 0.7152 * linear[:, 1] + 0.0722 * linear[:, 2]
+
 def calculate_contrast_ratio(l1: float, l2: float) -> float:
     """
     Calculates WCAG 2.1 contrast ratio: (Llighter + 0.05) / (Ldarker + 0.05)
@@ -597,6 +605,14 @@ class ImageGovernanceService:
             except Exception:
                 poly_pts_list.append(None)
 
+        # Precompute combined text masks once across all regions for high performance
+        all_text_mask = np.zeros((img_h, img_w), dtype=np.uint8)
+        for other_pts in poly_pts_list:
+            if other_pts is not None:
+                cv2.fillPoly(all_text_mask, [other_pts], 255)
+        other_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+        all_text_dilated = cv2.dilate(all_text_mask, other_kernel)
+
         results: List[LocalizedContrastRegion] = []
 
         for idx, reg in enumerate(ocr_regions):
@@ -634,20 +650,15 @@ class ImageGovernanceService:
             mask_dilated = cv2.dilate(mask_text, kernel)
             mask_bg_candidate = cv2.subtract(mask_dilated, mask_text)
 
-            # Exclude other text regions from candidate background
-            mask_other = np.zeros((img_h, img_w), dtype=np.uint8)
-            for jdx, other_pts in enumerate(poly_pts_list):
-                if jdx != idx and other_pts is not None:
-                    cv2.fillPoly(mask_other, [other_pts], 255)
-
-            other_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-            mask_other_dilated = cv2.dilate(mask_other, other_kernel)
+            # Exclude other text regions from candidate background efficiently
+            mask_other_dilated = cv2.subtract(all_text_dilated, mask_text)
             mask_bg = cv2.bitwise_and(mask_bg_candidate, cv2.bitwise_not(mask_other_dilated))
 
             bg_pixels = rgb_img[mask_bg == 255]
             if len(bg_pixels) < 15:
                 # Fall back to candidate without other dilation if tightly clustered
-                mask_bg = cv2.bitwise_and(mask_bg_candidate, cv2.bitwise_not(mask_other))
+                mask_other_plain = cv2.subtract(all_text_mask, mask_text)
+                mask_bg = cv2.bitwise_and(mask_bg_candidate, cv2.bitwise_not(mask_other_plain))
                 bg_pixels = rgb_img[mask_bg == 255]
 
             text_pixels = rgb_img[mask_text == 255]
@@ -675,7 +686,7 @@ class ImageGovernanceService:
             bg_median_rgb = tuple(int(x) for x in np.median(bg_pixels, axis=0))
             bg_lum = calculate_relative_luminance(bg_median_rgb)
 
-            bg_luminances = np.array([calculate_relative_luminance(p) for p in bg_pixels])
+            bg_luminances = calculate_relative_luminance_array(bg_pixels)
             std_bg = float(np.std(bg_luminances))
             min_bg_lum = float(np.percentile(bg_luminances, 10))
             max_bg_lum = float(np.percentile(bg_luminances, 90))
@@ -1133,6 +1144,14 @@ class ImageGovernanceService:
 
             if poster is None or logo is None:
                 return 0.0, (0, 0)
+
+            # Downsample large poster to max 1024px to keep CPU and memory low on free-tier
+            p_h_orig, p_w_orig = poster.shape[:2]
+            max_p = max(p_h_orig, p_w_orig)
+            scale_factor = 1.0
+            if max_p > 1024:
+                scale_factor = 1024.0 / max_p
+                poster = cv2.resize(poster, (max(1, int(p_w_orig * scale_factor)), max(1, int(p_h_orig * scale_factor))), interpolation=cv2.INTER_AREA)
 
             gray_poster = cv2.cvtColor(poster, cv2.COLOR_BGR2GRAY)
             gray_logo = cv2.cvtColor(logo, cv2.COLOR_BGR2GRAY)

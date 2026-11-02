@@ -142,9 +142,17 @@ class SuggestionService:
             GovernanceFinding.status != "passed_check"
         ).all()
 
+        finding_ids = [f.id for f in findings]
+        existing_map = {}
+        if finding_ids:
+            existing_recs = db.query(CorrectionSuggestion).filter(
+                CorrectionSuggestion.finding_id.in_(finding_ids)
+            ).all()
+            existing_map = {s.finding_id: s for s in existing_recs}
+
         for finding in findings:
             # Check if suggestion already exists for this finding
-            existing = db.query(CorrectionSuggestion).filter(CorrectionSuggestion.finding_id == finding.id).first()
+            existing = existing_map.get(finding.id)
             if existing:
                 suggestions.append(existing)
                 continue
