@@ -1,5 +1,6 @@
 import io
 import os
+import uuid
 import pytest
 import hashlib
 from PIL import Image, ImageDraw
@@ -61,28 +62,52 @@ def _make_vector_pdf_with_text(page_texts: list[str]) -> bytes:
     return _make_image_pdf([(800, 600, t) for t in page_texts])
 
 
+def _seed_historical_pdf_draft(client, headers, brand_id, title, page_specs_or_bytes, channel="Slide Deck", body_text="Compliant caption"):
+    """
+    Seeds a historical PDF file directly into storage and creates a ContentDraft
+    referencing it to test backward-compatible historical PDF governance and preview.
+    """
+    if isinstance(page_specs_or_bytes, bytes):
+        pdf_bytes = page_specs_or_bytes
+    else:
+        pdf_bytes = _make_image_pdf(page_specs_or_bytes)
+
+    temp_dir = os.path.abspath("./storage_data/historical_test_posters")
+    os.makedirs(temp_dir, exist_ok=True)
+    file_path = os.path.join(temp_dir, f"hist_{uuid.uuid4().hex[:8]}.pdf")
+    with open(file_path, "wb") as f:
+        f.write(pdf_bytes)
+
+    res_draft = client.post("/api/v1/content", headers=headers, json={
+        "brand_id": brand_id,
+        "title": title,
+        "channel": channel,
+        "body_text": body_text,
+        "poster_file_path": file_path,
+        "poster_alt_text": "Historical test deck"
+    })
+    return res_draft, file_path
+
+
 # =========================================================================
-# Regression Test 1: Valid Single-Page and Multi-Page PDFs
+# Regression Test 1: Valid Single-Page and Multi-Page PDFs (Rejection & Historical Inspection)
 # =========================================================================
 def test_1_valid_single_and_multi_page_pdf(client, auth_tokens):
     headers = auth_tokens["content_creator"]["headers"]
     res_b = client.get("/api/v1/brands", headers=headers)
     brand_id = res_b.json()[0]["id"]
 
-    # 1. Single-page PDF
+    # 1. Single-page PDF upload is rejected under new policy
     single_pdf = _make_image_pdf([(800, 1000, "Freshsip 100% Valencia Orange Juice")])
     res_upload = client.post(
         "/api/v1/content/upload-poster",
         headers=headers,
         files={"file": ("single_ad.pdf", io.BytesIO(single_pdf), "application/pdf")}
     )
-    assert res_upload.status_code == 200
-    meta1 = res_upload.json()
-    assert meta1["is_pdf"] is True
-    assert meta1["page_count"] == 1
-    assert meta1["format"] == "PDF"
+    assert res_upload.status_code == 400
+    assert "PDF advertisement uploads are no longer supported" in res_upload.json()["detail"]
 
-    # 2. Multi-page PDF (3 pages)
+    # 2. Multi-page PDF upload is also rejected under new policy
     multi_pdf = _make_image_pdf([
         (800, 600, "Page 1: Freshsip Citrus Brand Campaign"),
         (800, 600, "Page 2: 100% Cold-Pressed Nutrition"),
@@ -93,13 +118,28 @@ def test_1_valid_single_and_multi_page_pdf(client, auth_tokens):
         headers=headers,
         files={"file": ("deck_3page.pdf", io.BytesIO(multi_pdf), "application/pdf")}
     )
-    assert res_upload_m.status_code == 200
-    meta_m = res_upload_m.json()
-    assert meta_m["is_pdf"] is True
-    assert meta_m["page_count"] == 3
-    assert len(meta_m["pages"]) == 3
-    assert meta_m["pages"][0]["page_number"] == 1
-    assert meta_m["pages"][2]["page_number"] == 3
+    assert res_upload_m.status_code == 400
+    assert "PDF advertisement uploads are no longer supported" in res_upload_m.json()["detail"]
+
+    # 3. Verify that historical single and multi-page PDFs can still be inspected
+    res_draft_1, _ = _seed_historical_pdf_draft(client, headers, brand_id, "Hist Single", single_pdf)
+    assert res_draft_1.status_code == 200
+    v1_id = res_draft_1.json()["latest_version"]["id"]
+    res_p1 = client.get(f"/api/v1/content/versions/{v1_id}/pdf-pages", headers=headers)
+    assert res_p1.status_code == 200
+    assert res_p1.json()["is_pdf"] is True
+    assert res_p1.json()["page_count"] == 1
+
+    res_draft_m, _ = _seed_historical_pdf_draft(client, headers, brand_id, "Hist Multi", multi_pdf)
+    assert res_draft_m.status_code == 200
+    vm_id = res_draft_m.json()["latest_version"]["id"]
+    res_pm = client.get(f"/api/v1/content/versions/{vm_id}/pdf-pages", headers=headers)
+    assert res_pm.status_code == 200
+    assert res_pm.json()["is_pdf"] is True
+    assert res_pm.json()["page_count"] == 3
+    assert len(res_pm.json()["pages"]) == 3
+    assert res_pm.json()["pages"][0]["page_number"] == 1
+    assert res_pm.json()["pages"][2]["page_number"] == 3
 
 
 # =========================================================================
@@ -107,21 +147,33 @@ def test_1_valid_single_and_multi_page_pdf(client, auth_tokens):
 # =========================================================================
 def test_2_different_page_sizes_and_orientations(client, auth_tokens):
     headers = auth_tokens["content_creator"]["headers"]
+    res_b = client.get("/api/v1/brands", headers=headers)
+    brand_id = res_b.json()[0]["id"]
 
     # Mixed deck: Page 1 portrait (600x800), Page 2 landscape (1200x600), Page 3 square (800x800)
-    mixed_pdf = _make_image_pdf([
+    mixed_specs = [
         (600, 800, "Slide 1 Portrait Orientation"),
         (1200, 600, "Slide 2 Landscape Wide Banner"),
         (800, 800, "Slide 3 Square Social Carousel")
-    ])
+    ]
 
+    # Upload attempt must be rejected under new policy
     res = client.post(
         "/api/v1/content/upload-poster",
         headers=headers,
-        files={"file": ("mixed_deck.pdf", io.BytesIO(mixed_pdf), "application/pdf")}
+        files={"file": ("mixed_deck.pdf", io.BytesIO(_make_image_pdf(mixed_specs)), "application/pdf")}
     )
-    assert res.status_code == 200
-    data = res.json()
+    assert res.status_code == 400
+    assert "PDF advertisement uploads are no longer supported" in res.json()["detail"]
+
+    # Historical inspection preserves orientation detection
+    res_draft, _ = _seed_historical_pdf_draft(client, headers, brand_id, "Mixed Deck", mixed_specs)
+    assert res_draft.status_code == 200
+    v_id = res_draft.json()["latest_version"]["id"]
+
+    res_pages = client.get(f"/api/v1/content/versions/{v_id}/pdf-pages", headers=headers)
+    assert res_pages.status_code == 200
+    data = res_pages.json()
     assert data["page_count"] == 3
     pages = data["pages"]
     assert pages[0]["orientation"] == "portrait"
@@ -137,31 +189,21 @@ def test_3_page_to_finding_associations(client, auth_tokens):
     res_b = client.get("/api/v1/brands", headers=headers)
     brand_id = res_b.json()[0]["id"]
 
-    # 3-page deck: Page 1 is clean, Page 2 has a prohibited organic claim, Page 3 is clean
-    pdf_bytes = _make_image_pdf([
-        (800, 600, "Page 1: Freshsip Refreshing Summer Juice"),
-        (800, 600, "Page 2: 100% Certified Organic and USDA Organic Ingredients"),
-        (800, 600, "Page 3: Pure Citrus Enjoyment")
-    ])
-
-    res_upload = client.post(
-        "/api/v1/content/upload-poster",
-        headers=headers,
-        files={"file": ("campaign_deck.pdf", io.BytesIO(pdf_bytes), "application/pdf")}
+    # 3-page historical deck: Page 1 is clean, Page 2 has a prohibited organic claim, Page 3 is clean
+    res_draft, _ = _seed_historical_pdf_draft(
+        client, headers, brand_id, "Summer Campaign Deck",
+        [
+            (800, 600, "Page 1: Freshsip Refreshing Summer Juice"),
+            (800, 600, "Page 2: 100% Certified Organic and USDA Organic Ingredients"),
+            (800, 600, "Page 3: Pure Citrus Enjoyment")
+        ],
+        channel="PDF Presentation",
+        body_text="Compliant campaign caption describing citrus flavors."
     )
-    poster_path = res_upload.json()["file_path"]
-
-    res_draft = client.post("/api/v1/content", headers=headers, json={
-        "brand_id": brand_id,
-        "title": "Summer Campaign Deck",
-        "channel": "PDF Presentation",
-        "body_text": "Compliant campaign caption describing citrus flavors.",
-        "poster_file_path": poster_path,
-        "poster_alt_text": "Summer campaign 3-page slide deck"
-    })
+    assert res_draft.status_code == 200
     v_id = res_draft.json()["latest_version"]["id"]
 
-    # Run governance
+    # Run governance on historical multi-page PDF draft
     res_gov = client.post("/api/v1/governance/run", headers=headers, json={
         "content_version_id": v_id
     })
@@ -201,21 +243,12 @@ def test_4_ocr_confidence_and_unreadable_pages(client, auth_tokens):
     img1.save(buf, "PDF", save_all=True, append_images=[img2])
     pdf_bytes = buf.getvalue()
 
-    res_upload = client.post(
-        "/api/v1/content/upload-poster",
-        headers=headers,
-        files={"file": ("unreadable_page.pdf", io.BytesIO(pdf_bytes), "application/pdf")}
+    res_draft, _ = _seed_historical_pdf_draft(
+        client, headers, brand_id, "Low Contrast Test", pdf_bytes,
+        channel="Instagram Deck",
+        body_text="Compliant caption text"
     )
-    poster_path = res_upload.json()["file_path"]
-
-    res_draft = client.post("/api/v1/content", headers=headers, json={
-        "brand_id": brand_id,
-        "title": "Low Contrast Test",
-        "channel": "Instagram Deck",
-        "body_text": "Compliant caption text",
-        "poster_file_path": poster_path,
-        "poster_alt_text": "Low contrast deck testing"
-    })
+    assert res_draft.status_code == 200
     v_id = res_draft.json()["latest_version"]["id"]
 
     res_gov = client.post("/api/v1/governance/run", headers=headers, json={
@@ -236,24 +269,25 @@ def test_4_ocr_confidence_and_unreadable_pages(client, auth_tokens):
 def test_5_malformed_empty_encrypted_pdfs(client, auth_tokens):
     headers = auth_tokens["content_creator"]["headers"]
 
-    # 1. Malformed PDF (invalid signature)
+    # 1. New upload rejects malformed/corrupt/encrypted files
     res_bad = client.post(
         "/api/v1/content/upload-poster",
         headers=headers,
         files={"file": ("fake.pdf", io.BytesIO(b"NOT A REAL PDF FILE CONTENTS"), "application/pdf")}
     )
     assert res_bad.status_code == 400
-    assert "signature" in res_bad.json()["detail"].lower() or "invalid" in res_bad.json()["detail"].lower()
+    assert "PDF advertisement uploads are no longer supported" in res_bad.json()["detail"]
 
-    # 2. Corrupt PDF header
+    # 2. Corrupt PDF upload rejected
     res_corrupt = client.post(
         "/api/v1/content/upload-poster",
         headers=headers,
         files={"file": ("corrupt.pdf", io.BytesIO(b"%PDF-1.4\nBroken xref corrupt end"), "application/pdf")}
     )
     assert res_corrupt.status_code == 400
+    assert "PDF advertisement uploads are no longer supported" in res_corrupt.json()["detail"]
 
-    # 3. Encrypted PDF
+    # 3. Encrypted PDF upload rejected
     writer = PdfWriter()
     writer.add_blank_page(width=400, height=400)
     writer.encrypt("supersecret")
@@ -265,7 +299,30 @@ def test_5_malformed_empty_encrypted_pdfs(client, auth_tokens):
         files={"file": ("locked.pdf", io.BytesIO(enc_buf.getvalue()), "application/pdf")}
     )
     assert res_enc.status_code == 400
-    assert "encrypted" in res_enc.json()["detail"].lower()
+    assert "PDF advertisement uploads are no longer supported" in res_enc.json()["detail"]
+
+    # 4. Underlying pdf_service raises PDFValidationError for corrupt/encrypted files
+    import tempfile
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tf:
+        tf.write(b"NOT A REAL PDF FILE CONTENTS")
+        tf_name = tf.name
+    try:
+        with pytest.raises(PDFValidationError):
+            pdf_service.validate_pdf_file(tf_name)
+    finally:
+        if os.path.exists(tf_name):
+            os.remove(tf_name)
+
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tf:
+        tf.write(enc_buf.getvalue())
+        tf_enc_name = tf.name
+    try:
+        with pytest.raises(PDFValidationError) as exc_info:
+            pdf_service.validate_pdf_file(tf_enc_name)
+        assert "encrypted" in str(exc_info.value).lower()
+    finally:
+        if os.path.exists(tf_enc_name):
+            os.remove(tf_enc_name)
 
 
 # =========================================================================
@@ -274,7 +331,7 @@ def test_5_malformed_empty_encrypted_pdfs(client, auth_tokens):
 def test_6_page_count_and_file_size_limits(client, auth_tokens):
     headers = auth_tokens["content_creator"]["headers"]
 
-    # 1. Exceeds 30 pages (e.g. 32 pages)
+    # 1. New upload rejects PDFs regardless of page count or size
     large_deck = _make_image_pdf([(400, 400, f"Page {i}") for i in range(1, 33)])
     res_too_many = client.post(
         "/api/v1/content/upload-poster",
@@ -282,17 +339,20 @@ def test_6_page_count_and_file_size_limits(client, auth_tokens):
         files={"file": ("deck_32pages.pdf", io.BytesIO(large_deck), "application/pdf")}
     )
     assert res_too_many.status_code == 400
-    assert "30 pages" in res_too_many.json()["detail"] or "maximum" in res_too_many.json()["detail"].lower()
+    assert "PDF advertisement uploads are no longer supported" in res_too_many.json()["detail"]
 
-    # 2. Exceeds file size limit (> 25MB)
-    fake_large = b"%PDF-1.4\n" + b"0" * (26 * 1024 * 1024)
-    res_too_large = client.post(
-        "/api/v1/content/upload-poster",
-        headers=headers,
-        files={"file": ("huge.pdf", io.BytesIO(fake_large), "application/pdf")}
-    )
-    assert res_too_large.status_code == 400
-    assert "25mb" in res_too_large.json()["detail"].lower() or "size" in res_too_large.json()["detail"].lower()
+    # 2. Historical service limits: pdf_service enforces MAX_PDF_PAGE_COUNT and MAX_PDF_FILE_SIZE_BYTES
+    import tempfile
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tf:
+        tf.write(large_deck)
+        tf_name = tf.name
+    try:
+        with pytest.raises(PDFValidationError) as exc_info:
+            pdf_service.validate_pdf_file(tf_name)
+        assert "30 pages" in str(exc_info.value).lower() or "maximum" in str(exc_info.value).lower()
+    finally:
+        if os.path.exists(tf_name):
+            os.remove(tf_name)
 
 
 # =========================================================================
@@ -307,23 +367,13 @@ def test_7_duplicate_extraction_paths_deduplicated_on_same_page(client, auth_tok
     res_b = client.get("/api/v1/brands", headers=headers)
     brand_id = res_b.json()[0]["id"]
 
-    # Single-page PDF with violation
-    pdf_bytes = _make_image_pdf([(800, 600, "100% Certified Organic and USDA Organic Freshsip")])
-    res_upload = client.post(
-        "/api/v1/content/upload-poster",
-        headers=headers,
-        files={"file": ("dedup_test.pdf", io.BytesIO(pdf_bytes), "application/pdf")}
+    res_draft, _ = _seed_historical_pdf_draft(
+        client, headers, brand_id, "Deduplication Test",
+        [(800, 600, "100% Certified Organic and USDA Organic Freshsip")],
+        channel="Instagram Post",
+        body_text="Compliant body copy."
     )
-    poster_path = res_upload.json()["file_path"]
-
-    res_draft = client.post("/api/v1/content", headers=headers, json={
-        "brand_id": brand_id,
-        "title": "Deduplication Test",
-        "channel": "Instagram Post",
-        "body_text": "Compliant body copy.",
-        "poster_file_path": poster_path,
-        "poster_alt_text": "Test alt text"
-    })
+    assert res_draft.status_code == 200
     v_id = res_draft.json()["latest_version"]["id"]
 
     res_gov = client.post("/api/v1/governance/run", headers=headers, json={"content_version_id": v_id})
@@ -331,7 +381,6 @@ def test_7_duplicate_extraction_paths_deduplicated_on_same_page(client, auth_tok
     findings = res_gov.json()["findings"]
 
     organic_page1 = [f for f in findings if f.get("page_number") == 1 and ("organic" in f["title"].lower() or "organic" in f.get("explanation", "").lower())]
-    # Should not produce duplicate identical findings for the same matched rule on the same page
     rule_ids = [f.get("matched_rule_id") for f in organic_page1 if f.get("matched_rule_id")]
     assert len(rule_ids) == len(set(rule_ids)), "Findings for the same rule on the same page should be deduplicated"
 
@@ -350,27 +399,17 @@ def test_8_findings_repeating_across_different_pages(client, auth_tokens):
     # Page 1: prohibited organic claim
     # Page 2: clean page
     # Page 3: prohibited organic claim again
-    pdf_bytes = _make_image_pdf([
-        (800, 600, "Page 1: Certified Organic Valencia Oranges"),
-        (800, 600, "Page 2: Clean Citrus Refreshment"),
-        (800, 600, "Page 3: USDA Organic Harvest and Pure Cold-Pressed Juice")
-    ])
-
-    res_upload = client.post(
-        "/api/v1/content/upload-poster",
-        headers=headers,
-        files={"file": ("repeat_violation.pdf", io.BytesIO(pdf_bytes), "application/pdf")}
+    res_draft, _ = _seed_historical_pdf_draft(
+        client, headers, brand_id, "Cross Page Violation",
+        [
+            (800, 600, "Page 1: Certified Organic Valencia Oranges"),
+            (800, 600, "Page 2: Clean Citrus Refreshment"),
+            (800, 600, "Page 3: USDA Organic Harvest and Pure Cold-Pressed Juice")
+        ],
+        channel="Slide Deck",
+        body_text="Compliant caption"
     )
-    poster_path = res_upload.json()["file_path"]
-
-    res_draft = client.post("/api/v1/content", headers=headers, json={
-        "brand_id": brand_id,
-        "title": "Cross Page Violation",
-        "channel": "Slide Deck",
-        "body_text": "Compliant caption",
-        "poster_file_path": poster_path,
-        "poster_alt_text": "Slide deck with repeated violation"
-    })
+    assert res_draft.status_code == 200
     v_id = res_draft.json()["latest_version"]["id"]
 
     res_gov = client.post("/api/v1/governance/run", headers=headers, json={"content_version_id": v_id})
@@ -392,23 +431,14 @@ def test_9_pdf_checksum_changes_and_stale_governance(client, auth_tokens):
     res_b = client.get("/api/v1/brands", headers=headers)
     brand_id = res_b.json()[0]["id"]
 
-    # Initial PDF
+    # Initial historical PDF
     pdf1 = _make_image_pdf([(800, 600, "Initial PDF Content")])
-    res_u1 = client.post(
-        "/api/v1/content/upload-poster",
-        headers=headers,
-        files={"file": ("v1.pdf", io.BytesIO(pdf1), "application/pdf")}
+    res_draft, path1 = _seed_historical_pdf_draft(
+        client, headers, brand_id, "Checksum Integrity Item", pdf1,
+        channel="Instagram",
+        body_text="Caption copy"
     )
-    path1 = res_u1.json()["file_path"]
-
-    res_draft = client.post("/api/v1/content", headers=headers, json={
-        "brand_id": brand_id,
-        "title": "Checksum Integrity Item",
-        "channel": "Instagram",
-        "body_text": "Caption copy",
-        "poster_file_path": path1,
-        "poster_alt_text": "Initial deck"
-    })
+    assert res_draft.status_code == 200
     content_id = res_draft.json()["id"]
     v1_id = res_draft.json()["latest_version"]["id"]
     checksum_1 = res_draft.json()["latest_version"]["checksum"]
@@ -419,12 +449,11 @@ def test_9_pdf_checksum_changes_and_stale_governance(client, auth_tokens):
 
     # Modify PDF and save new revision
     pdf2 = _make_image_pdf([(800, 600, "Modified New PDF Content With Different Text")])
-    res_u2 = client.post(
-        "/api/v1/content/upload-poster",
-        headers=headers,
-        files={"file": ("v2.pdf", io.BytesIO(pdf2), "application/pdf")}
-    )
-    path2 = res_u2.json()["file_path"]
+    temp_dir = os.path.abspath("./storage_data/historical_test_posters")
+    os.makedirs(temp_dir, exist_ok=True)
+    path2 = os.path.join(temp_dir, f"hist_{uuid.uuid4().hex[:8]}.pdf")
+    with open(path2, "wb") as f:
+        f.write(pdf2)
 
     res_v2 = client.put(f"/api/v1/content/{content_id}", headers=headers, json={
         "title": "Checksum Integrity Item",
@@ -454,23 +483,14 @@ def test_10_critical_blockers_and_warning_justification_in_pdf_approval(client, 
     res_b = client.get("/api/v1/brands", headers=creator_headers)
     brand_id = res_b.json()[0]["id"]
 
-    # Create PDF with a critical violation (prohibited sugar-free claim FR-RULE-005)
+    # Create historical PDF with a critical violation (prohibited sugar-free claim FR-RULE-005)
     pdf_bytes = _make_image_pdf([(800, 600, "Freshsip Valencia Orange: 100% sugar-free and zero sugar drink")])
-    res_upload = client.post(
-        "/api/v1/content/upload-poster",
-        headers=creator_headers,
-        files={"file": ("critical_violation.pdf", io.BytesIO(pdf_bytes), "application/pdf")}
+    res_draft, _ = _seed_historical_pdf_draft(
+        client, creator_headers, brand_id, "Critical Blocker PDF Submission", pdf_bytes,
+        channel="Instagram",
+        body_text="Caption body"
     )
-    poster_path = res_upload.json()["file_path"]
-
-    res_draft = client.post("/api/v1/content", headers=creator_headers, json={
-        "brand_id": brand_id,
-        "title": "Critical Blocker PDF Submission",
-        "channel": "Instagram",
-        "body_text": "Caption body",
-        "poster_file_path": poster_path,
-        "poster_alt_text": "Deck with blocker"
-    })
+    assert res_draft.status_code == 200
     content_id = res_draft.json()["id"]
     v_id = res_draft.json()["latest_version"]["id"]
 
@@ -500,23 +520,14 @@ def test_11_tenant_isolation_and_permissions(client, auth_tokens, db_session):
     res_b = client.get("/api/v1/brands", headers=creator_headers)
     brand_id = res_b.json()[0]["id"]
 
-    # Upload PDF
+    # Seed historical PDF
     pdf_bytes = _make_image_pdf([(800, 600, "Confidential Tenant Content")])
-    res_upload = client.post(
-        "/api/v1/content/upload-poster",
-        headers=creator_headers,
-        files={"file": ("tenant_deck.pdf", io.BytesIO(pdf_bytes), "application/pdf")}
+    res_draft, _ = _seed_historical_pdf_draft(
+        client, creator_headers, brand_id, "Tenant Isolation Deck", pdf_bytes,
+        channel="Instagram",
+        body_text="Tenant Copy"
     )
-    poster_path = res_upload.json()["file_path"]
-
-    res_draft = client.post("/api/v1/content", headers=creator_headers, json={
-        "brand_id": brand_id,
-        "title": "Tenant Isolation Deck",
-        "channel": "Instagram",
-        "body_text": "Tenant Copy",
-        "poster_file_path": poster_path,
-        "poster_alt_text": "Tenant Deck Alt"
-    })
+    assert res_draft.status_code == 200
     v_id = res_draft.json()["latest_version"]["id"]
 
     # Creator cannot approve (permission check)
@@ -526,7 +537,7 @@ def test_11_tenant_isolation_and_permissions(client, auth_tokens, db_session):
     })
     assert res_approve_attempt.status_code in [403, 404]
 
-    # Verify rendering endpoint responds for authorized creator
+    # Verify rendering endpoint responds for authorized creator (historical PDF preview)
     res_page1 = client.get(f"/api/v1/content/versions/{v_id}/poster?page=1", headers=creator_headers)
     assert res_page1.status_code == 200
     assert res_page1.headers["content-type"] == "image/png"
@@ -581,24 +592,15 @@ def test_13_pdf_pages_metadata_endpoint(client, auth_tokens):
         (600, 800, "Page 1 Portrait"),
         (900, 600, "Page 2 Landscape")
     ])
-    res_u = client.post(
-        "/api/v1/content/upload-poster",
-        headers=headers,
-        files={"file": ("pages_meta.pdf", io.BytesIO(pdf_bytes), "application/pdf")}
+    res_draft, _ = _seed_historical_pdf_draft(
+        client, headers, brand_id, "Pages Metadata Test", pdf_bytes,
+        channel="Deck",
+        body_text="Copy"
     )
-    poster_path = res_u.json()["file_path"]
-
-    res_draft = client.post("/api/v1/content", headers=headers, json={
-        "brand_id": brand_id,
-        "title": "Pages Metadata Test",
-        "channel": "Deck",
-        "body_text": "Copy",
-        "poster_file_path": poster_path,
-        "poster_alt_text": "Alt"
-    })
+    assert res_draft.status_code == 200
     v_id = res_draft.json()["latest_version"]["id"]
 
-    # Call GET /versions/{version_id}/pdf-pages
+    # Call GET /versions/{version_id}/pdf-pages (historical PDF inspection)
     res_pages = client.get(f"/api/v1/content/versions/{v_id}/pdf-pages", headers=headers)
     assert res_pages.status_code == 200
     meta_data = res_pages.json()

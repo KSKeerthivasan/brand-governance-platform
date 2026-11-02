@@ -11,9 +11,24 @@ def test_poster_governance_integration_and_versioning(client, auth_tokens):
     assert res_b.status_code == 200
     brand_id = res_b.json()[0]["id"]
 
-    # Locate available test poster image
-    test_poster_path = "./storage_data/19a8a675-7b45-4834-8836-de1996c2a919/knowledge/campaign_citrus_ginger_pending.png"
-    assert os.path.exists(test_poster_path), "Test poster image file must exist on disk"
+    import io
+    from PIL import Image, ImageDraw
+
+    # Dynamically generate test poster image and upload
+    img = Image.new("RGB", (800, 600), color=(20, 50, 30))
+    d = ImageDraw.Draw(img)
+    d.text((50, 50), "Freshsip Summer Citrus Splash", fill=(255, 255, 255))
+    d.text((50, 120), "100% Cold-Pressed Valencia Oranges", fill=(240, 240, 240))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    res_upload = client.post(
+        "/api/v1/content/upload-poster",
+        headers=creator_headers,
+        files={"file": ("campaign_citrus_ginger.png", buf, "image/png")}
+    )
+    assert res_upload.status_code == 200
+    test_poster_path = res_upload.json()["file_path"]
 
     # 2. Create content draft WITH an attached poster
     res_create = client.post("/api/v1/content", headers=creator_headers, json={

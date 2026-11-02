@@ -1,4 +1,5 @@
 import os
+import io
 import math
 import numpy as np
 import pytest
@@ -489,8 +490,21 @@ def test_14_end_to_end_governance_integration_with_localized_contrast(client, au
     assert res_b.status_code == 200
     brand_id = res_b.json()[0]["id"]
 
-    test_poster = "./storage_data/19a8a675-7b45-4834-8836-de1996c2a919/knowledge/campaign_citrus_ginger_pending.png"
-    assert os.path.exists(test_poster), f"Poster asset required: {test_poster}"
+    # Generate test poster dynamically with text for localized contrast analysis
+    img = Image.new("RGB", (800, 600), color=(10, 20, 50))
+    d = ImageDraw.Draw(img)
+    d.text((50, 50), "Freshsip Sparkling Citrus Refreshment", fill=(255, 255, 255))
+    d.text((50, 120), "100% Cold-Pressed Valencia Oranges", fill=(200, 200, 200))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    res_upload = client.post(
+        "/api/v1/content/upload-poster",
+        headers=headers,
+        files={"file": ("campaign_citrus_ginger.png", buf, "image/png")}
+    )
+    assert res_upload.status_code == 200
+    test_poster = res_upload.json()["file_path"]
 
     res_draft = client.post("/api/v1/content", headers=headers, json={
         "brand_id": brand_id,

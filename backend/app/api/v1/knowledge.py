@@ -45,11 +45,13 @@ from app.services.auth import decode_access_token
 from app.api.deps import get_current_user, require_any_member, require_knowledge_reviewer, require_content_creator, security
 
 CATEGORY_TITLE_MAP = {
-    "pdf_brand_guidelines": "PDF Brand Guidelines",
-    "pdf_product_knowledge": "PDF Product Knowledge & Specs",
+    "pdf_brand_guidelines": "PDF Brand Guidelines (Retired)",
+    "pdf_product_knowledge": "PDF Product Knowledge & Specs (Retired)",
     "supporting_doc": "Supporting Evidence Document",
     "brand_asset_image": "Brand Asset / Creative Image",
 }
+
+RETIRED_SOURCE_TYPES = {"pdf_brand_guidelines", "pdf_product_knowledge"}
 
 router = APIRouter()
 
@@ -67,9 +69,20 @@ async def upload_knowledge_document(
     db: Session = Depends(get_db)
 ):
     """
-    Step 2 & 3: Upload brand guidelines, product knowledge, or creative assets.
-    CRITICAL REQUIREMENT: Newly uploaded document and extracted records start in PENDING_REVIEW state.
+    Upload supporting evidence documents or brand creative assets.
+    Note: 'pdf_brand_guidelines' and 'pdf_product_knowledge' onboarding categories are retired.
+    Brand identity, products, claims, and disclosures are managed via structured forms and Excel imports.
     """
+    if source_type in RETIRED_SOURCE_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"The '{source_type}' onboarding category has been retired. "
+                "Please use the Brand Profile Form, Product Catalogue Excel, "
+                "Claims Register Excel, and Required Disclosures Excel for structured brand onboarding."
+            )
+        )
+
     org_id = membership.organization_id
 
     # Save file securely
@@ -133,72 +146,9 @@ async def upload_knowledge_document(
     # Extract based on file type
     local_path = storage_service.get_file_path_for_processing(file_path)
     if file.content_type == "application/pdf" or safe_filename.lower().endswith(".pdf"):
-        try:
-            summary, candidate_rules, candidate_facts, extraction_timings = extract_pdf_text_and_candidates(local_path, safe_filename)
-        except Exception as ex:
-            logger.error(f"Extraction error for '{safe_filename}': {ex}")
-            summary = f"Document upload preserved. Extraction encountered an error: {str(ex)[:200]}. You may enter rules manually using '+ Add Rule' or reprocess later."
-            candidate_rules = []
-            candidate_facts = []
-            extraction_timings = {"outcome": "failed", "error": str(ex)}
-
-        source.extracted_summary = summary
-
-        for r in candidate_rules:
-            rule_obj = KnowledgeRule(
-                organization_id=org_id,
-                brand_id=brand_id,
-                source_id=source.id,
-                rule_type=r["rule_type"],
-                title=r["title"],
-                pattern=r["pattern"],
-                explanation=r["explanation"],
-                severity=r["severity"],
-                context_condition=r.get("context_condition"),
-                source_citation=r.get("source_citation"),
-                rule_code=r.get("rule_code"),
-                source_status=r.get("source_status", "unknown"),
-                enforcement_action=r.get("enforcement_action", "flag_for_review"),
-                rationale=r.get("rationale"),
-                recommended_alternatives=r.get("recommended_alternatives"),
-                exceptions=r.get("exceptions"),
-                examples_bad=r.get("examples_bad"),
-                examples_good=r.get("examples_good"),
-                evidence_passage=r.get("evidence_passage"),
-                page_number=r.get("page_number"),
-                evidence_validation=r.get("evidence_validation", "unverified"),
-                uncertainty_notes=r.get("uncertainty_notes"),
-                original_extraction=r.get("original_extraction"),
-                is_corrected=False,
-                status="pending_review"  # Starts in pending_review
-            )
-            db.add(rule_obj)
-            rules_created += 1
-
-        for f in candidate_facts:
-            fact_obj = KnowledgeFact(
-                organization_id=org_id,
-                brand_id=brand_id,
-                source_id=source.id,
-                product_name=f["product_name"],
-                category=f["category"],
-                fact_key=f["fact_key"],
-                fact_value=f["fact_value"],
-                supporting_evidence=f.get("supporting_evidence"),
-                source_citation=f.get("source_citation"),
-                product_id=f.get("product_id"),
-                unit=f.get("unit"),
-                value_status=f.get("value_status", "explicitly_stated"),
-                source_status=f.get("source_status", "approved"),
-                page_number=f.get("page_number"),
-                evidence_validation=f.get("evidence_validation", "unverified"),
-                uncertainty_notes=f.get("uncertainty_notes"),
-                original_extraction=f.get("original_extraction"),
-                is_corrected=False,
-                status="pending_review"  # Starts in pending_review
-            )
-            db.add(fact_obj)
-            facts_created += 1
+        # Supporting evidence document: preserve file in storage without extracting candidate rules or facts.
+        # Governance rules and facts are authored via structured Excel registers and Brand Profile.
+        source.extracted_summary = f"Supporting evidence document: {safe_filename} ({file_size} bytes)."
 
     elif (file.content_type and file.content_type.startswith("image/")) or source_type == "brand_asset_image" or safe_filename.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".svg", ".gif")):
         meta = extract_image_metadata(local_path, safe_filename)

@@ -134,7 +134,7 @@ def test_scenario_retry_upload_avoids_duplicate_sources_and_rules(auth_headers, 
         res1 = client.post(
             "/api/v1/knowledge/upload",
             headers=headers,
-            data={"source_type": "pdf_brand_guidelines", "title": "Test Retry Doc"},
+            data={"source_type": "supporting_doc", "title": "Test Retry Doc"},
             files={"file": ("test_retry_doc.pdf", pdf_bytes, "application/pdf")}
         )
         assert res1.status_code == 200, res1.text
@@ -153,7 +153,7 @@ def test_scenario_retry_upload_avoids_duplicate_sources_and_rules(auth_headers, 
         res2 = client.post(
             "/api/v1/knowledge/upload",
             headers=headers,
-            data={"source_type": "pdf_brand_guidelines", "title": "Test Retry Doc"},
+            data={"source_type": "supporting_doc", "title": "Test Retry Doc"},
             files={"file": ("test_retry_doc.pdf", pdf_bytes, "application/pdf")}
         )
         assert res2.status_code == 200, res2.text

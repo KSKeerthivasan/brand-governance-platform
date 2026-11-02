@@ -22,14 +22,7 @@ def _build_version_out(ver: ContentVersion) -> ContentVersionOut:
         out.poster_url = f"/api/v1/content/versions/{ver.id}/poster"
         if ver.poster_file_path.lower().endswith(".pdf"):
             out.is_pdf = True
-            try:
-                from app.services.pdf_service import pdf_service
-                if storage_service.check_exists(ver.poster_file_path):
-                    local_p = storage_service.get_file_path_for_processing(ver.poster_file_path)
-                    meta = pdf_service.validate_pdf_file(local_p)
-                    out.page_count = meta.page_count
-            except Exception:
-                out.page_count = 1
+            out.page_count = None
     return out
 
 @router.post("/upload-poster")
@@ -39,49 +32,33 @@ async def upload_poster(
     db: Session = Depends(get_db)
 ):
     """
-    Upload a poster image or multi-page marketing PDF to accompany a marketing content draft.
+    Upload an advertisement creative image (PNG, JPG, or WEBP) to accompany a marketing content draft.
+    PDF advertisement uploads are rejected.
     """
+    filename_lower = (file.filename or "").lower()
+    content_type_lower = (file.content_type or "").lower()
+
+    if filename_lower.endswith(".pdf") or content_type_lower == "application/pdf":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="PDF advertisement uploads are no longer supported. Please upload an image creative in PNG, JPG, or WEBP format."
+        )
+
+    allowed_exts = (".png", ".jpg", ".jpeg", ".webp")
+    allowed_mimes = ("image/png", "image/jpeg", "image/webp")
+    if not any(filename_lower.endswith(ext) for ext in allowed_exts) and not any(content_type_lower == m for m in allowed_mimes):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported file format. Please upload an image creative in PNG, JPG, or WEBP format."
+        )
+
     dest_path, bytes_written = await storage_service.save_file(
         file=file,
         org_id=membership.organization_id,
         subfolder="posters"
     )
     safe_filename = os.path.basename(dest_path)
-    is_pdf = safe_filename.lower().endswith(".pdf") or (file.content_type == "application/pdf")
     local_path = storage_service.get_file_path_for_processing(dest_path)
-
-    if is_pdf:
-        from app.services.pdf_service import pdf_service, PDFValidationError
-        try:
-            pdf_meta = pdf_service.validate_pdf_file(local_path)
-        except PDFValidationError as e:
-            storage_service.delete_file(dest_path)
-            raise HTTPException(status_code=400, detail=f"PDF validation failed: {str(e)}")
-
-        first_p = pdf_meta.pages[0] if pdf_meta.pages else None
-        return {
-            "file_path": dest_path,
-            "filename": safe_filename,
-            "is_pdf": True,
-            "width": first_p.width_px if first_p else 800,
-            "height": first_p.height_px if first_p else 1000,
-            "color_mode": "RGB",
-            "format": "PDF",
-            "size_bytes": bytes_written,
-            "page_count": pdf_meta.page_count,
-            "pages": [
-                {
-                    "page_number": p.page_number,
-                    "width_pt": p.width_pt,
-                    "height_pt": p.height_pt,
-                    "width_px": p.width_px,
-                    "height_px": p.height_px,
-                    "orientation": p.orientation,
-                    "aspect_ratio": p.aspect_ratio
-                }
-                for p in pdf_meta.pages
-            ]
-        }
 
     width, height, mode, format_name = None, None, "RGB", "PNG"
     try:

@@ -125,7 +125,7 @@ export const KnowledgeLibrary: React.FC = () => {
   const [sourceModalOpen, setSourceModalOpen] = useState(false);
   const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [sourceTitle, setSourceTitle] = useState('');
-  const [sourceType, setSourceType] = useState('pdf_brand_guidelines');
+  const [sourceType, setSourceType] = useState('supporting_doc');
   const [uploadingSource, setUploadingSource] = useState(false);
 
   // Extracted PDF text viewing modal state
@@ -1251,13 +1251,13 @@ export const KnowledgeLibrary: React.FC = () => {
                   onClick={() => {
                     setSourceFile(null);
                     setSourceTitle('');
-                    setSourceType('pdf_brand_guidelines');
+                    setSourceType('supporting_doc');
                     setSourceModalOpen(true);
                   }}
                   className="btn btn-primary"
                   style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.82rem' }}
                 >
-                  <Upload size={14} /> Upload Reference Document
+                  <Upload size={14} /> Upload Evidence Document
                 </button>
               )}
               <button
@@ -1857,9 +1857,9 @@ export const KnowledgeLibrary: React.FC = () => {
           <div className="card" style={{ width: 540, background: '#131b2e', border: '1px solid rgba(99, 102, 241, 0.4)' }}>
             <div className="flex-between" style={{ marginBottom: 16 }}>
               <div>
-                <h2 className="title-md">Upload Reference Document</h2>
+                <h2 className="title-md">Upload Supporting Evidence Document</h2>
                 <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>
-                  Brand guidelines PDFs or supporting regulatory documents.
+                  Supporting regulatory documents, certifications, or claim substantiation files.
                 </span>
               </div>
               <button onClick={() => setSourceModalOpen(false)} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }}>
@@ -1875,8 +1875,6 @@ export const KnowledgeLibrary: React.FC = () => {
                   onChange={(e) => setSourceType(e.target.value)}
                   className="input"
                 >
-                  <option value="pdf_brand_guidelines">PDF Brand Guidelines</option>
-                  <option value="pdf_product_knowledge">PDF Product Knowledge & Specs</option>
                   <option value="supporting_doc">Supporting Evidence Document</option>
                 </select>
               </div>
@@ -1885,7 +1883,7 @@ export const KnowledgeLibrary: React.FC = () => {
                 <label className="form-label">Document Title</label>
                 <input
                   type="text"
-                  placeholder="e.g. Master Brand Style & Compliance Guide 2026"
+                  placeholder="e.g. Clinical Trial Report or Regulatory Certification"
                   value={sourceTitle}
                   onChange={(e) => setSourceTitle(e.target.value)}
                   className="input"

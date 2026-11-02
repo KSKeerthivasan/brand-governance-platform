@@ -16,6 +16,10 @@ def get_engine():
             db_engine = create_engine(
                 primary_url,
                 connect_args={"connect_timeout": 5},
+                pool_size=5,
+                max_overflow=5,
+                pool_timeout=15,
+                pool_recycle=300,
                 pool_pre_ping=True
             )
             with db_engine.connect() as conn:

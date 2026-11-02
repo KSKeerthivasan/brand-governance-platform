@@ -69,7 +69,21 @@ def test_scenario_b_existing_draft_attach_poster_and_check(client, auth_tokens):
     v1_id = res_create.json()["latest_version"]["id"]
 
     # 2. Attach creative poster file path and alt-text in editor, then save & check
-    poster_path = "./storage_data/19a8a675-7b45-4834-8836-de1996c2a919/knowledge/campaign_citrus_ginger_pending.png"
+    import io
+    from PIL import Image, ImageDraw
+    img = Image.new("RGB", (800, 600), color=(10, 40, 30))
+    d = ImageDraw.Draw(img)
+    d.text((50, 50), "Natural Sparkling Refreshment", fill=(255, 255, 255))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    res_upload = client.post(
+        "/api/v1/content/upload-poster",
+        headers=headers,
+        files={"file": ("test_poster.png", buf, "image/png")}
+    )
+    assert res_upload.status_code == 200
+    poster_path = res_upload.json()["file_path"]
     alt_text = "Close-up of a sparkling can on ice surrounded by sliced lemons and limes"
     res_update = client.put(f"/api/v1/content/{content_id}", headers=headers, json={
         "title": "Poster Visual Check",

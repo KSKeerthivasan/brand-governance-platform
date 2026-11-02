@@ -159,26 +159,34 @@ export const ContentStudio: React.FC = () => {
     }
   };
 
+  const isPollingRef = useRef(false);
+
   const loadContents = async (silent = false) => {
+    if (silent && isPollingRef.current) return;
+    if (silent) isPollingRef.current = true;
     try {
-      const [items, b, a, prods] = await Promise.all([
-        api.getContentItems(),
-        api.getBrands(),
-        api.getAssets(),
-        api.getProducts().catch(() => [])
-      ]);
-      setContentList(items);
-      setBrands(b);
-      setAssets(a);
-      setProducts(prods || []);
-      if (b.length > 0 && !selectedBrandId) {
-        setSelectedBrandId(b[0].id);
-      }
       if (!silent) {
+        // Initial page load or manual refresh: fetch static catalogue data and content items
+        const [items, b, a, prods] = await Promise.all([
+          api.getContentItems(),
+          api.getBrands(),
+          api.getAssets(),
+          api.getProducts().catch(() => [])
+        ]);
+        setContentList(items);
+        setBrands(b);
+        setAssets(a);
+        setProducts(prods || []);
+        if (b.length > 0 && !selectedBrandId) {
+          setSelectedBrandId(b[0].id);
+        }
         if (items.length > 0 && !selectedContent) {
           selectDraft(items[0]);
         }
       } else {
+        // Background polling: fetch ONLY content items (lightweight draft enumeration)
+        const items = await api.getContentItems();
+        setContentList(items);
         if (selectedContent && !saving && !submitting && !checking) {
           const freshItem = items.find(i => i.id === selectedContent.id);
           if (freshItem) {
@@ -187,13 +195,16 @@ export const ContentStudio: React.FC = () => {
               const vers = await api.getContentVersions(freshItem.id);
               setVersions(vers);
             } catch {
-              // ignore
+              // ignore version load error
             }
           }
         }
       }
     } catch (err) {
       console.error('Failed to load content items:', err);
+      if (silent) throw err; // Propagate to useAutoRefresh so backoff delay engages
+    } finally {
+      if (silent) isPollingRef.current = false;
     }
   };
 
@@ -203,9 +214,9 @@ export const ContentStudio: React.FC = () => {
 
   useAutoRefresh(() => {
     if (!saving && !submitting && !checking && !isDirty && !draftsDrawerOpen) {
-      loadContents(true);
+      return loadContents(true);
     }
-  }, { intervalMs: 6000 });
+  }, { intervalMs: 30000 });
 
   const selectDraft = async (item: ContentItem) => {
     setSelectedContent(item);
@@ -327,15 +338,20 @@ export const ContentStudio: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+      alert('PDF advertisement uploads are no longer supported. Please upload an image creative in PNG, JPG, or WEBP format.');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
     setUploadingPoster(true);
     try {
       const uploadRes = await api.uploadPoster(file);
-      const isPdfFile = uploadRes.format === 'PDF' || file.name.toLowerCase().endsWith('.pdf');
       setPosterFilePath(uploadRes.file_path);
       setPosterAssetId(null);
-      setIsPdf(isPdfFile);
-      setPdfPageCount(uploadRes.page_count || 1);
-      setPdfPages(uploadRes.pages || []);
+      setIsPdf(false);
+      setPdfPageCount(1);
+      setPdfPages([]);
       setSelectedPage(1);
       setPageFilter('all');
       setPosterMeta({
@@ -345,11 +361,7 @@ export const ContentStudio: React.FC = () => {
         color_mode: uploadRes.color_mode,
         format: uploadRes.format
       });
-      if (isPdfFile) {
-        setPosterPreviewUrl(null);
-      } else {
-        setPosterPreviewUrl(URL.createObjectURL(file));
-      }
+      setPosterPreviewUrl(URL.createObjectURL(file));
       setIsDirty(true);
     } catch (err: any) {
       alert(`Creative upload failed: ${err.message}`);
@@ -644,8 +656,8 @@ export const ContentStudio: React.FC = () => {
 
   const pageFilteredFindings = isPdf && pageFilter !== 'all'
     ? (pageFilter === 'caption'
-        ? allFindings.filter(f => f.page_number === null || f.page_number === undefined)
-        : allFindings.filter(f => f.page_number === pageFilter))
+      ? allFindings.filter(f => f.page_number === null || f.page_number === undefined)
+      : allFindings.filter(f => f.page_number === pageFilter))
     : allFindings;
 
   const textFindings = pageFilteredFindings.filter(f =>
@@ -1135,16 +1147,16 @@ export const ContentStudio: React.FC = () => {
                 >
                   <Upload size={26} color="#818cf8" style={{ margin: '0 auto 8px auto' }} />
                   <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#e2e8f0' }}>
-                    {uploadingPoster ? 'Uploading creative...' : 'Upload Advertisement Creative Poster or PDF Deck'}
+                    {uploadingPoster ? 'Uploading creative...' : 'Upload Advertisement Creative Artwork'}
                   </div>
                   <div style={{ fontSize: '0.74rem', color: 'var(--text-dim)', marginTop: 4 }}>
-                    Supports PDF (up to 30 pages), PNG, JPG, or WEBP up to 25MB.
+                    Supports PNG, JPG, or WEBP up to 25MB.
                   </div>
                   <input
                     type="file"
                     ref={fileInputRef}
                     onChange={handleFileUpload}
-                    accept="image/png,image/jpeg,image/webp,application/pdf"
+                    accept="image/png,image/jpeg,image/webp"
                     style={{ display: 'none' }}
                   />
                 </div>

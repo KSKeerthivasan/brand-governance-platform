@@ -269,12 +269,12 @@ def test_6_suggestions_linked_to_finding_version_checksum_and_pdf_page(client, a
         (800, 600, "Page 2: Freshsip Valencia 100% sugar-free juice")
     ])
 
-    res_upload = client.post(
-        "/api/v1/content/upload-poster",
-        headers=headers,
-        files={"file": ("page_test.pdf", io.BytesIO(pdf_bytes), "application/pdf")}
-    )
-    poster_path = res_upload.json()["file_path"]
+    import uuid
+    temp_dir = os.path.abspath("./storage_data/historical_test_posters")
+    os.makedirs(temp_dir, exist_ok=True)
+    poster_path = os.path.join(temp_dir, f"hist_{uuid.uuid4().hex[:8]}.pdf")
+    with open(poster_path, "wb") as f:
+        f.write(pdf_bytes)
 
     res_create = client.post(
         "/api/v1/content",
