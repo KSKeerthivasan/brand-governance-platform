@@ -60,6 +60,8 @@ async def upload_knowledge_document(
     title: Optional[str] = Form(None),
     source_type: str = Form(...),  # pdf_brand_guidelines, pdf_product_knowledge, supporting_doc, brand_asset_image
     brand_id: Optional[str] = Form(None),
+    asset_type: Optional[str] = Form(None),
+    usage_notes: Optional[str] = Form(None),
     membership: OrganizationMembership = Depends(require_knowledge_reviewer),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -198,22 +200,25 @@ async def upload_knowledge_document(
             db.add(fact_obj)
             facts_created += 1
 
-    elif file.content_type and file.content_type.startswith("image/"):
+    elif (file.content_type and file.content_type.startswith("image/")) or source_type == "brand_asset_image" or safe_filename.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".svg", ".gif")):
         meta = extract_image_metadata(local_path, safe_filename)
+        effective_asset_type = asset_type.strip() if (asset_type and asset_type.strip()) else meta.get("asset_type", "campaign_creative")
+        effective_asset_name = title.strip() if (title and title.strip()) else safe_filename
         asset_obj = BrandAsset(
             organization_id=org_id,
             brand_id=brand_id,
             source_id=source.id,
-            asset_name=safe_filename,
-            asset_type=meta.get("asset_type", "campaign_creative"),
+            asset_name=effective_asset_name,
+            asset_type=effective_asset_type,
             file_path=file_path,
-            mime_type=meta.get("mime_type", file.content_type),
+            mime_type=meta.get("mime_type", file.content_type or "image/png"),
             width=meta.get("width"),
             height=meta.get("height"),
             aspect_ratio=meta.get("aspect_ratio"),
             color_mode=meta.get("color_mode"),
             min_clearance_px=meta.get("min_clearance_px", 20),
             alt_text_required=True,
+            usage_notes=usage_notes.strip() if (usage_notes and usage_notes.strip()) else None,
             status="pending_review"  # Starts in pending_review
         )
         db.add(asset_obj)
@@ -1628,7 +1633,7 @@ def activate_knowledge_base(
 
 @router.get("/products")
 def get_products(
-    membership: OrganizationMembership = Depends(require_content_creator),
+    membership: OrganizationMembership = Depends(require_any_member),
     db: Session = Depends(get_db)
 ):
     """Returns all active catalogue products for the user's organization."""
@@ -1639,7 +1644,7 @@ def get_products(
 
 @router.get("/claims")
 def get_claims(
-    membership: OrganizationMembership = Depends(require_knowledge_reviewer),
+    membership: OrganizationMembership = Depends(require_any_member),
     db: Session = Depends(get_db)
 ):
     """Returns all claims for the user's organization."""
@@ -1650,7 +1655,7 @@ def get_claims(
 
 @router.get("/disclosures")
 def get_disclosures(
-    membership: OrganizationMembership = Depends(require_knowledge_reviewer),
+    membership: OrganizationMembership = Depends(require_any_member),
     db: Session = Depends(get_db)
 ):
     """Returns all required disclosures for the user's organization."""
@@ -1875,3 +1880,83 @@ def get_kb_versions(
     return db.query(KnowledgeBaseVersion).filter(
         KnowledgeBaseVersion.organization_id == membership.organization_id
     ).order_by(KnowledgeBaseVersion.version_num.desc()).all()
+
+
+@router.delete("/assets/{asset_id}")
+def delete_brand_asset(
+    asset_id: str,
+    membership: OrganizationMembership = Depends(require_knowledge_reviewer),
+    db: Session = Depends(get_db)
+):
+    """Deletes a brand asset."""
+    asset = db.query(BrandAsset).filter(
+        BrandAsset.id == asset_id,
+        BrandAsset.organization_id == membership.organization_id
+    ).first()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found.")
+    db.delete(asset)
+    db.commit()
+    return {"message": "Asset deleted successfully."}
+
+
+@router.get("/sources/{source_id}/download")
+def download_knowledge_source(
+    source_id: str,
+    token: Optional[str] = None,
+    auth_credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db)
+):
+    """Downloads or streams an uploaded knowledge source file."""
+    actual_token = auth_credentials.credentials if auth_credentials else token
+    if not actual_token:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+
+    payload = decode_access_token(actual_token)
+    if not payload or "sub" not in payload:
+        raise HTTPException(status_code=401, detail="Invalid or expired token.")
+
+    source = db.query(KnowledgeSource).filter(KnowledgeSource.id == source_id).first()
+    if not source or not source.file_path:
+        raise HTTPException(status_code=404, detail="Source not found.")
+
+    if not storage_service.check_exists(source.file_path):
+        raise HTTPException(status_code=404, detail="Source file not found on disk.")
+
+    local_path = storage_service.get_file_path_for_processing(source.file_path)
+    return FileResponse(
+        local_path,
+        media_type=source.mime_type or "application/octet-stream",
+        filename=source.filename
+    )
+
+
+@router.get("/imports")
+def list_staged_imports(
+    membership: OrganizationMembership = Depends(require_any_member),
+    db: Session = Depends(get_db)
+):
+    """Lists historical and active Excel imports for the organization."""
+    imports = db.query(StagedImport).filter(
+        StagedImport.organization_id == membership.organization_id
+    ).order_by(StagedImport.created_at.desc()).all()
+
+    results = []
+    for imp in imports:
+        creator_name = imp.creator.full_name if (imp.creator and imp.creator.full_name) else (imp.creator.email if imp.creator else "System")
+        results.append({
+            "id": imp.id,
+            "organization_id": imp.organization_id,
+            "import_type": imp.import_type,
+            "file_name": imp.file_name,
+            "status": imp.status,
+            "total_rows": imp.total_rows,
+            "valid_rows": imp.valid_rows,
+            "error_rows": imp.error_rows,
+            "has_disclosures": imp.has_disclosures,
+            "created_by": imp.created_by,
+            "created_by_name": creator_name,
+            "created_at": imp.created_at.isoformat() if imp.created_at else None,
+            "expires_at": imp.expires_at.isoformat() if imp.expires_at else None,
+        })
+    return results

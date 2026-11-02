@@ -5,7 +5,8 @@ import {
   ApprovalDecision, AuditEvent, ImageGovernanceResult,
   AnalyticsOverview, RepeatedMistakesData, AmbiguityReportData, ReviewerFindingDisposition,
   CorrectionSuggestion, CorrectionSuggestionApplyResponse,
-  BrandProfile, StagedImportPreview, KnowledgeBaseActivation, OrganizationInvitation, InvitationVerifyData
+  BrandProfile, StagedImportPreview, KnowledgeBaseActivation, OrganizationInvitation, InvitationVerifyData,
+  ProductItem, ClaimItem, RequiredDisclosureItem, StagedImportHistoryItem
 } from '../types';
 
 let rawBase = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
@@ -166,6 +167,11 @@ class ApiService {
     return this.request<any>(`/knowledge/sources/${sourceId}/text`);
   }
 
+  getSourceDownloadUrl(sourceId: string): string {
+    const token = this.token || localStorage.getItem('inkloom_token');
+    return `${API_BASE}/knowledge/sources/${sourceId}/download${token ? `?token=${encodeURIComponent(token)}` : ''}`;
+  }
+
   // Knowledge Rules
   async createRule(payload: any): Promise<KnowledgeRule> {
     return this.request<KnowledgeRule>('/knowledge/rules', {
@@ -228,6 +234,12 @@ class ApiService {
     return this.request<BrandAsset>(`/knowledge/assets/${assetId}/review`, {
       method: 'POST',
       body: JSON.stringify({ status })
+    });
+  }
+
+  async deleteAsset(assetId: string): Promise<any> {
+    return this.request(`/knowledge/assets/${assetId}`, {
+      method: 'DELETE'
     });
   }
 
@@ -600,16 +612,20 @@ class ApiService {
   }
 
   // Products, Claims, Disclosures
-  async getProducts(): Promise<any[]> {
-    return this.request<any[]>('/knowledge/products');
+  async getProducts(): Promise<ProductItem[]> {
+    return this.request<ProductItem[]>('/knowledge/products');
   }
 
-  async getClaims(): Promise<any[]> {
-    return this.request<any[]>('/knowledge/claims');
+  async getClaims(): Promise<ClaimItem[]> {
+    return this.request<ClaimItem[]>('/knowledge/claims');
   }
 
-  async getDisclosures(): Promise<any[]> {
-    return this.request<any[]>('/knowledge/disclosures');
+  async getDisclosures(): Promise<RequiredDisclosureItem[]> {
+    return this.request<RequiredDisclosureItem[]>('/knowledge/disclosures');
+  }
+
+  async getStagedImports(): Promise<StagedImportHistoryItem[]> {
+    return this.request<StagedImportHistoryItem[]>('/knowledge/imports');
   }
 
   // Real-Time In-Editor Assistant (Round 2 Commitment 1)

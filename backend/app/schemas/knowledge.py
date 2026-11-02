@@ -128,6 +128,7 @@ class BrandAssetBase(BaseModel):
     color_mode: Optional[str] = None
     min_clearance_px: Optional[int] = 20
     alt_text_required: bool = True
+    usage_notes: Optional[str] = None
 
 class BrandAssetReview(BaseModel):
     status: str  # approved, rejected

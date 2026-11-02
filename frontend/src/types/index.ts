@@ -137,6 +137,7 @@ export interface BrandAsset {
   color_mode?: string;
   min_clearance_px?: number;
   alt_text_required: boolean;
+  usage_notes?: string;
   status: 'pending_review' | 'approved' | 'rejected';
   created_at: string;
 }
@@ -554,4 +555,75 @@ export interface InvitationVerifyData {
   role: UserRole;
   expires_at: string;
   is_existing_user: boolean;
+}
+
+
+export interface ProductItem {
+  id: string;
+  organization_id: string;
+  product_id: string;
+  product_name: string;
+  product_category: string;
+  offering_type: string;
+  product_description: string;
+  variant_name?: string;
+  sku?: string;
+  pack_size?: number;
+  pack_unit?: string;
+  ingredients_components?: string;
+  key_features?: string;
+  specifications?: string;
+  known_limitations?: string;
+  applicable_market: string;
+  record_status: string;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface ClaimItem {
+  id: string;
+  organization_id: string;
+  product_id?: string;
+  claim_id: string;
+  claim_text: string;
+  claim_type: string;
+  claim_status: string;
+  applicable_product_id: string;
+  approved_variations?: string;
+  restricted_conditions?: string;
+  prohibited_variations?: string;
+  applicable_market: string;
+  effective_from: string;
+  effective_until?: string;
+  created_at: string;
+}
+
+export interface RequiredDisclosureItem {
+  id: string;
+  organization_id: string;
+  product_id?: string;
+  disclosure_id: string;
+  disclosure_text: string;
+  applicable_product_id: string;
+  applicable_market: string;
+  applies_when: string;
+  effective_from: string;
+  effective_until?: string;
+  created_at: string;
+}
+
+export interface StagedImportHistoryItem {
+  id: string;
+  organization_id: string;
+  import_type: string;
+  file_name: string;
+  status: string;
+  total_rows: number;
+  valid_rows: number;
+  error_rows: number;
+  has_disclosures: boolean;
+  created_by?: string;
+  created_by_name?: string;
+  created_at?: string;
+  expires_at?: string;
 }

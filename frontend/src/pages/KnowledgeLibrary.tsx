@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   Upload,
   BookOpen,
@@ -6,7 +6,6 @@ import {
   XCircle,
   FileText,
   AlertCircle,
-  Filter,
   Check,
   X,
   FileCheck,
@@ -14,7 +13,6 @@ import {
   Tag,
   Edit3,
   RefreshCw,
-  Quote,
   AlertTriangle,
   Download,
   ExternalLink,
@@ -28,153 +26,156 @@ import {
   ArrowRight,
   ShieldCheck,
   Plus,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Star,
+  Trash2,
+  Eye,
+  Search,
+  Calendar,
+  Package,
+  Layers,
+  SlidersHorizontal,
+  CheckSquare,
+  Clock
 } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { StatusBadge } from '../components/StatusBadge';
-import { KnowledgeRule, KnowledgeFact, KnowledgeSource, BrandAsset, Brand } from '../types';
+import {
+  KnowledgeSource,
+  BrandAsset,
+  Brand,
+  ProductItem,
+  ClaimItem,
+  RequiredDisclosureItem,
+  StagedImportHistoryItem
+} from '../types';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import { ExcelImportModal } from '../components/ExcelImportModal';
 import { BrandProfileModal } from '../components/BrandProfileModal';
 
 export const KnowledgeLibrary: React.FC = () => {
   const { role } = useAuth();
-  const [searchParams] = useSearchParams();
-  const tabParam = searchParams.get('tab');
-  const initialTab = (tabParam && ['rules', 'facts', 'assets', 'sources', 'rescore'].includes(tabParam))
-    ? (tabParam as 'rules' | 'facts' | 'assets' | 'sources' | 'rescore')
-    : 'rules';
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  const [activeTab, setActiveTab] = useState<'rules' | 'facts' | 'assets' | 'sources' | 'rescore'>(initialTab);
+  // Exactly three primary tabs as mandated:
+  // 1. 'facts' (Product Facts & Claims - default)
+  // 2. 'assets' (Brand Assets)
+  // 3. 'sources' (Uploaded Sources)
+  const tabParam = searchParams.get('tab');
+  const validTabs: Array<'facts' | 'assets' | 'sources'> = ['facts', 'assets', 'sources'];
+  const initialTab = (tabParam && validTabs.includes(tabParam as any))
+    ? (tabParam as 'facts' | 'assets' | 'sources')
+    : 'facts';
+
+  const [activeTab, setActiveTab] = useState<'facts' | 'assets' | 'sources'>(initialTab);
+
+  // Sub-tabs inside Product Facts & Claims
+  const [factsSubTab, setFactsSubTab] = useState<'products' | 'claims' | 'disclosures'>('products');
 
   useEffect(() => {
-    if (tabParam && ['rules', 'facts', 'assets', 'sources', 'rescore'].includes(tabParam)) {
-      setActiveTab(tabParam as 'rules' | 'facts' | 'assets' | 'sources' | 'rescore');
+    if (tabParam && validTabs.includes(tabParam as any)) {
+      setActiveTab(tabParam as 'facts' | 'assets' | 'sources');
     }
   }, [tabParam]);
 
-  const [rules, setRules] = useState<KnowledgeRule[]>([]);
-  const [facts, setFacts] = useState<KnowledgeFact[]>([]);
+  const handleTabChange = (newTab: 'facts' | 'assets' | 'sources') => {
+    setActiveTab(newTab);
+    setSearchParams({ tab: newTab });
+  };
+
+  // Live Data State
+  const [products, setProducts] = useState<ProductItem[]>([]);
+  const [claims, setClaims] = useState<ClaimItem[]>([]);
+  const [disclosures, setDisclosures] = useState<RequiredDisclosureItem[]>([]);
   const [assets, setAssets] = useState<BrandAsset[]>([]);
   const [sources, setSources] = useState<KnowledgeSource[]>([]);
+  const [stagedImports, setStagedImports] = useState<StagedImportHistoryItem[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
-  const [rescoreJobs, setRescoreJobs] = useState<any[]>([]);
   const [kbVersions, setKbVersions] = useState<any[]>([]);
-  const [selectedRescoreJob, setSelectedRescoreJob] = useState<any | null>(null);
-  const [rescoringTriggering, setRescoringTriggering] = useState(false);
-  const [selectedKbVersionId, setSelectedKbVersionId] = useState<string>('');
+  const [rescoreJobs, setRescoreJobs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Canonical Brand Asset & Document Upload State
-  const [selectedBrandId, setSelectedBrandId] = useState('');
-  const [uploading, setUploading] = useState(false);
+  // Search & Filter State
+  const [productSearch, setProductSearch] = useState('');
+  const [productStatusFilter, setProductStatusFilter] = useState('all');
+  const [claimSearch, setClaimSearch] = useState('');
+  const [claimStatusFilter, setClaimStatusFilter] = useState('all');
+  const [claimTypeFilter, setClaimTypeFilter] = useState('all');
+  const [disclosureSearch, setDisclosureSearch] = useState('');
+  const [assetCategoryFilter, setAssetCategoryFilter] = useState('all');
+  const [assetStatusFilter, setAssetStatusFilter] = useState('all');
 
-  // Asset upload modal state
+  // Detail Modals State
+  const [selectedProduct, setSelectedProduct] = useState<ProductItem | null>(null);
+  const [selectedClaim, setSelectedClaim] = useState<ClaimItem | null>(null);
+  const [selectedDisclosure, setSelectedDisclosure] = useState<RequiredDisclosureItem | null>(null);
+
+  // Brand Asset Upload Modal State
   const [assetModalOpen, setAssetModalOpen] = useState(false);
   const [assetFile, setAssetFile] = useState<File | null>(null);
   const [assetTitle, setAssetTitle] = useState('');
+  const [assetCategory, setAssetCategory] = useState<'logo' | 'product_image' | 'brand_graphic' | 'approved_asset'>('logo');
+  const [assetUsageNotes, setAssetUsageNotes] = useState('');
+  const [selectedBrandId, setSelectedBrandId] = useState('');
+  const [uploadingAsset, setUploadingAsset] = useState(false);
 
-  // Reference document upload modal state
+  // Reference Document Upload Modal State (Uploaded Sources tab)
   const [sourceModalOpen, setSourceModalOpen] = useState(false);
   const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [sourceTitle, setSourceTitle] = useState('');
   const [sourceType, setSourceType] = useState('pdf_brand_guidelines');
+  const [uploadingSource, setUploadingSource] = useState(false);
 
-  // Filter state
-  const [statusFilter, setStatusFilter] = useState<string>('all');
-
-  // Rule edit modal state
-  const [editRuleModalOpen, setEditRuleModalOpen] = useState(false);
-  const [editingRule, setEditingRule] = useState<KnowledgeRule | null>(null);
-  const [editRuleForm, setEditRuleForm] = useState({
-    title: '',
-    pattern: '',
-    explanation: '',
-    severity: 'warning',
-    rule_type: 'prohibited_word',
-    review_notes: ''
-  });
-  const [savingEdit, setSavingEdit] = useState(false);
-
-  // Fact edit modal state
-  const [editFactModalOpen, setEditFactModalOpen] = useState(false);
-  const [editingFact, setEditingFact] = useState<KnowledgeFact | null>(null);
-  const [editFactForm, setEditFactForm] = useState({
-    product_name: '',
-    fact_key: '',
-    fact_value: '',
-    category: 'specification',
-    review_notes: ''
-  });
-
-  // Round 3 Staged Excel & Brand Profile Modals
-  const [excelModalOpen, setExcelModalOpen] = useState(false);
-  const [brandProfileModalOpen, setBrandProfileModalOpen] = useState(false);
-  const [activating, setActivating] = useState(false);
-
-  const handleActivateKnowledgeBase = async () => {
-    const reason = prompt("Enter activation reason for new immutable manifest snapshot:", "Published new approved guidelines & catalogue baseline");
-    if (reason === null) return;
-    setActivating(true);
-    try {
-      const res = await api.activateKnowledgeBase(reason);
-      alert(`Knowledge Base Version ${res.version_num} activated successfully!\nSHA-256 Manifest: ${res.manifest_sha256.substring(0, 16)}...\nProducts: ${res.counts.products}, Claims: ${res.counts.claims}, Disclosures: ${res.counts.required_disclosures}`);
-      await loadData();
-    } catch (err: any) {
-      alert(`Activation error: ${err.message}`);
-    } finally {
-      setActivating(false);
-    }
-  };
-
-  // Reprocessing state
-  const [reprocessingId, setReprocessingId] = useState<string | null>(null);
-
-  // Manual rule creation modal state
-  const [addRuleModalOpen, setAddRuleModalOpen] = useState(false);
-  const [newRuleForm, setNewRuleForm] = useState({
-    title: '',
-    pattern: '',
-    explanation: '',
-    severity: 'warning',
-    rule_type: 'prohibited_word',
-    source_id: '',
-    page_number: '',
-    evidence_passage: ''
-  });
-  const [savingNewRule, setSavingNewRule] = useState(false);
-
-  // Document text viewing modal state
+  // Extracted PDF text viewing modal state
   const [viewTextModalOpen, setViewTextModalOpen] = useState(false);
   const [viewTextData, setViewTextData] = useState<any>(null);
   const [loadingText, setLoadingText] = useState(false);
   const [selectedTextPage, setSelectedTextPage] = useState<number>(1);
+  const [reprocessingId, setReprocessingId] = useState<string | null>(null);
+
+  // Mandatory Top Controls Modals
+  const [excelModalOpen, setExcelModalOpen] = useState(false);
+  const [brandProfileModalOpen, setBrandProfileModalOpen] = useState(false);
+  const [activating, setActivating] = useState(false);
+
+  // Relocated Policy Impact Rescoring Modal
+  const [rescoreModalOpen, setRescoreModalOpen] = useState(false);
+  const [selectedKbVersionId, setSelectedKbVersionId] = useState<string>('');
+  const [rescoringTriggering, setRescoringTriggering] = useState(false);
+  const [selectedRescoreJob, setSelectedRescoreJob] = useState<any | null>(null);
 
   const isReviewer = role === 'knowledge_reviewer' || role === 'org_admin';
 
+  // Load all live knowledge data
   const loadData = async (silent = false) => {
     try {
       if (!silent) setLoading(true);
-      const [r, f, a, s, b, rJobs, versions] = await Promise.all([
-        api.getRules(),
-        api.getFacts(),
-        api.getAssets(),
-        api.getKnowledgeSources(),
-        api.getBrands(),
-        api.getRescoreJobs().catch(() => []),
-        api.getKnowledgeBaseVersions().catch(() => [])
+      const [prods, clms, discs, asts, srcs, imps, brnds, vers, rJobs] = await Promise.all([
+        api.getProducts().catch(() => []),
+        api.getClaims().catch(() => []),
+        api.getDisclosures().catch(() => []),
+        api.getAssets().catch(() => []),
+        api.getKnowledgeSources().catch(() => []),
+        api.getStagedImports().catch(() => []),
+        api.getBrands().catch(() => []),
+        api.getKnowledgeBaseVersions().catch(() => []),
+        api.getRescoreJobs().catch(() => [])
       ]);
-      setRules(r);
-      setFacts(f);
-      setAssets(a);
-      setSources(s);
-      setBrands(b);
+
+      setProducts(prods || []);
+      setClaims(clms || []);
+      setDisclosures(discs || []);
+      setAssets(asts || []);
+      setSources(srcs || []);
+      setStagedImports(imps || []);
+      setBrands(brnds || []);
+      setKbVersions(vers || []);
       setRescoreJobs(rJobs || []);
-      setKbVersions(versions || []);
-      if (b.length > 0 && !selectedBrandId) {
-        setSelectedBrandId(b[0].id);
+
+      if (brnds.length > 0 && !selectedBrandId) {
+        setSelectedBrandId(brnds[0].id);
       }
     } catch (err) {
       console.error('Failed to load knowledge data:', err);
@@ -188,170 +189,98 @@ export const KnowledgeLibrary: React.FC = () => {
   }, []);
 
   useAutoRefresh(() => {
-    if (!uploading && !editRuleModalOpen && !editFactModalOpen && !reprocessingId) {
+    if (!uploadingAsset && !uploadingSource && !assetModalOpen && !sourceModalOpen && !reprocessingId) {
       loadData(true);
     }
-  }, { intervalMs: 8000 });
+  }, { intervalMs: 10000 });
 
-  const categoryLabels: Record<string, string> = {
-    pdf_brand_guidelines: 'PDF Brand Guidelines',
-    pdf_product_knowledge: 'PDF Product Knowledge & Specs',
-    supporting_doc: 'Supporting Evidence Document',
-    brand_asset_image: 'Brand Asset / Creative Image',
-  };
-
-
-
-  const handleOpenAddRule = () => {
-    setNewRuleForm({
-      title: '',
-      pattern: '',
-      explanation: '',
-      severity: 'warning',
-      rule_type: 'prohibited_word',
-      source_id: sources.length > 0 ? sources[0].id : '',
-      page_number: '',
-      evidence_passage: ''
-    });
-    setAddRuleModalOpen(true);
-  };
-
-  const handleSaveNewRule = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newRuleForm.title.trim() || !newRuleForm.pattern.trim() || !newRuleForm.explanation.trim()) {
-      alert("Please provide title, trigger pattern, and explanation for the rule.");
-      return;
-    }
-    setSavingNewRule(true);
+  // 1. Mandatory Activation Handler
+  const handleActivateKnowledgeBase = async () => {
+    const reason = prompt(
+      "Enter activation reason for new immutable manifest snapshot:",
+      "Published new approved guidelines, catalogue & brand assets baseline"
+    );
+    if (reason === null) return;
+    setActivating(true);
     try {
-      const selectedSrc = sources.find(s => s.id === newRuleForm.source_id);
-      await api.createRule({
-        title: newRuleForm.title.trim(),
-        pattern: newRuleForm.pattern.trim(),
-        explanation: newRuleForm.explanation.trim(),
-        severity: newRuleForm.severity,
-        rule_type: newRuleForm.rule_type,
-        source_id: newRuleForm.source_id || undefined,
-        brand_id: selectedBrandId || (selectedSrc ? selectedSrc.brand_id : undefined) || (brands.length > 0 ? brands[0].id : undefined),
-        source_citation: selectedSrc ? `${selectedSrc.filename}${newRuleForm.page_number ? `, Page ${newRuleForm.page_number}` : ''}` : undefined,
-        page_number: newRuleForm.page_number ? parseInt(newRuleForm.page_number, 10) : undefined,
-        evidence_passage: newRuleForm.evidence_passage.trim() || undefined,
-        uncertainty_notes: "MANUAL_ENTRY: Created manually by reviewer. Human verification required before approval."
-      });
-      setAddRuleModalOpen(false);
+      const res = await api.activateKnowledgeBase(reason);
+      alert(
+        `Knowledge Base Version ${res.version_num} activated successfully!\n\n` +
+        `SHA-256 Manifest: ${res.manifest_sha256.substring(0, 16)}...\n` +
+        `Products: ${res.counts.products}, Claims: ${res.counts.claims}, Disclosures: ${res.counts.required_disclosures}`
+      );
       await loadData();
     } catch (err: any) {
-      alert(`Failed to create rule: ${err.message || err}`);
+      alert(`Activation error: ${err.message}`);
     } finally {
-      setSavingNewRule(false);
+      setActivating(false);
     }
   };
 
-  const handleViewSourceText = async (sourceId: string, title: string) => {
-    setLoadingText(true);
-    setViewTextModalOpen(true);
-    setViewTextData(null);
-    setSelectedTextPage(1);
-    try {
-      const data = await api.getSourceText(sourceId);
-      setViewTextData(data);
-    } catch (err: any) {
-      alert(`Could not fetch document text: ${err.message || err}`);
-      setViewTextModalOpen(false);
-    } finally {
-      setLoadingText(false);
-    }
-  };
-
-  const getExtractionMethodBadge = (rule: KnowledgeRule) => {
-    if (rule.status === 'approved') {
-      return (
-        <span style={{ background: 'rgba(34, 197, 94, 0.15)', color: '#4ade80', border: '1px solid rgba(34, 197, 94, 0.3)', padding: '2px 8px', borderRadius: 4, fontSize: '0.7rem', fontWeight: 600 }}>
-          Approved Rule (Verified)
-        </span>
-      );
-    }
-    if (rule.uncertainty_notes && rule.uncertainty_notes.includes('LOCAL_EXTRACTION')) {
-      return (
-        <span style={{ background: 'rgba(99, 102, 241, 0.15)', color: '#818cf8', border: '1px solid rgba(99, 102, 241, 0.3)', padding: '2px 8px', borderRadius: 4, fontSize: '0.7rem', fontWeight: 600 }}>
-          Local Text Extraction (Pending Review)
-        </span>
-      );
-    }
-    if (rule.uncertainty_notes && rule.uncertainty_notes.includes('MANUAL_ENTRY')) {
-      return (
-        <span style={{ background: 'rgba(236, 72, 153, 0.15)', color: '#f472b6', border: '1px solid rgba(236, 72, 153, 0.3)', padding: '2px 8px', borderRadius: 4, fontSize: '0.7rem', fontWeight: 600 }}>
-          Manual Entry (Pending Review)
-        </span>
-      );
-    }
-    return (
-      <span style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', border: '1px solid rgba(245, 158, 11, 0.3)', padding: '2px 8px', borderRadius: 4, fontSize: '0.7rem', fontWeight: 600 }}>
-        AI Candidate (Pending Review)
-      </span>
-    );
-  };
-
-  const handleViewSamplePdf = (e: React.MouseEvent) => {
-    e.preventDefault();
-    const sampleUrl = '/samples/Willow_and_Vale_Brand_Governance_Manual_Sample.pdf';
-    fetch(sampleUrl, { method: 'HEAD' })
-      .then((res) => {
-        const cType = res.headers.get('content-type') || '';
-        if (res.ok && cType.includes('pdf')) {
-          window.open(sampleUrl, '_blank', 'noopener,noreferrer');
-        } else {
-          alert(
-            "Sample Document Staging Notice:\n\n" +
-            "Expected location: frontend/public/samples/Willow_and_Vale_Brand_Governance_Manual_Sample.pdf\n\n" +
-            "The sample reference PDF is not currently staged at this path in the public assets directory.\n" +
-            "Once placed at this path, it will open directly in your browser as a downloadable reference manual."
-          );
-        }
-      })
-      .catch(() => {
-        alert(
-          "Sample Document Staging Notice:\n\n" +
-          "Expected location: frontend/public/samples/Willow_and_Vale_Brand_Governance_Manual_Sample.pdf\n\n" +
-          "The sample reference PDF is not currently staged at this path in the public assets directory.\n" +
-          "Once placed at this path, it will open directly in your browser as a downloadable reference manual."
-        );
-      });
-  };
-
+  // Brand Asset Upload Handler
   const handleUploadAsset = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!assetFile) {
       alert("Please select an image file (PNG, SVG, JPG, WEBP).");
       return;
     }
-    setUploading(true);
+    setUploadingAsset(true);
     try {
       const formData = new FormData();
       formData.append('file', assetFile);
       formData.append('title', assetTitle.trim() || assetFile.name);
       formData.append('source_type', 'brand_asset_image');
-      if (selectedBrandId) formData.append('brand_id', selectedBrandId);
+      formData.append('asset_type', assetCategory);
+      if (assetUsageNotes.trim()) {
+        formData.append('usage_notes', assetUsageNotes.trim());
+      }
+      if (selectedBrandId) {
+        formData.append('brand_id', selectedBrandId);
+      }
 
       await api.uploadKnowledge(formData);
       setAssetModalOpen(false);
       setAssetFile(null);
       setAssetTitle('');
+      setAssetUsageNotes('');
+      setAssetCategory('logo');
       await loadData();
     } catch (err: any) {
       alert(`Asset upload error: ${err.message}`);
     } finally {
-      setUploading(false);
+      setUploadingAsset(false);
     }
   };
 
+  // Asset Approval / Review Handler
+  const handleReviewAsset = async (assetId: string, status: 'approved' | 'rejected') => {
+    try {
+      await api.reviewAsset(assetId, status);
+      await loadData();
+    } catch (err: any) {
+      alert(`Review error: ${err.message}`);
+    }
+  };
+
+  // Asset Deletion Handler
+  const handleDeleteAsset = async (assetId: string) => {
+    if (!confirm("Are you sure you want to delete this brand asset?")) return;
+    try {
+      await api.deleteAsset(assetId);
+      await loadData();
+    } catch (err: any) {
+      alert(`Delete error: ${err.message}`);
+    }
+  };
+
+  // Reference Source Upload Handler
   const handleUploadSource = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!sourceFile) {
-      alert("Please select a PDF document.");
+      alert("Please select a document file.");
       return;
     }
-    setUploading(true);
+    setUploadingSource(true);
     try {
       const formData = new FormData();
       formData.append('file', sourceFile);
@@ -363,145 +292,38 @@ export const KnowledgeLibrary: React.FC = () => {
       setSourceModalOpen(false);
       setSourceFile(null);
       setSourceTitle('');
-      alert(`Uploaded '${created.title}'. Extracted ${created.rules_count || 0} candidate rules and ${created.facts_count || 0} facts into Pending Review.`);
+      alert(`Uploaded '${created.title}'. Stored in Pending Review.`);
       await loadData();
     } catch (err: any) {
       alert(`Document upload error: ${err.message}`);
     } finally {
-      setUploading(false);
+      setUploadingSource(false);
     }
   };
 
-  const handleReviewRule = async (ruleId: string, status: 'approved' | 'rejected') => {
-    const notes = prompt(`Enter review notes for ${status.toUpperCase()}:`, `Reviewed by ${role}`);
-    if (notes === null) return;
+  // View PDF Extracted Text Handler
+  const handleOpenViewText = async (sourceId: string) => {
+    setLoadingText(true);
+    setViewTextModalOpen(true);
+    setSelectedTextPage(1);
     try {
-      await api.reviewRule(ruleId, status, notes);
-      await loadData();
+      const data = await api.getSourceText(sourceId);
+      setViewTextData(data);
     } catch (err: any) {
-      alert(`Review error: ${err.message}`);
-    }
-  };
-
-  const handleOpenEditRule = (rule: KnowledgeRule) => {
-    setEditingRule(rule);
-    setEditRuleForm({
-      title: rule.title,
-      pattern: rule.pattern,
-      explanation: rule.explanation,
-      severity: rule.severity,
-      rule_type: rule.rule_type,
-      review_notes: rule.review_notes || ''
-    });
-    setEditRuleModalOpen(true);
-  };
-
-  const handleSaveRuleCorrection = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingRule) return;
-    setSavingEdit(true);
-    try {
-      await api.updateRule(editingRule.id, editRuleForm);
-      setEditRuleModalOpen(false);
-      setEditingRule(null);
-      await loadData();
-    } catch (err: any) {
-      alert(`Correction error: ${err.message}`);
+      alert(`Could not load document text: ${err.message}`);
+      setViewTextModalOpen(false);
     } finally {
-      setSavingEdit(false);
+      setLoadingText(false);
     }
   };
 
-  const handleReviewFact = async (factId: string, status: 'approved' | 'rejected') => {
-    const notes = prompt(`Enter review notes for ${status.toUpperCase()}:`, `Fact verified by ${role}`);
-    if (notes === null) return;
-    try {
-      await api.reviewFact(factId, status, notes);
-      await loadData();
-    } catch (err: any) {
-      alert(`Review error: ${err.message}`);
-    }
-  };
-
-  const handleOpenEditFact = (fact: KnowledgeFact) => {
-    setEditingFact(fact);
-    setEditFactForm({
-      product_name: fact.product_name,
-      fact_key: fact.fact_key,
-      fact_value: fact.fact_value,
-      category: fact.category,
-      review_notes: fact.review_notes || ''
-    });
-    setEditFactModalOpen(true);
-  };
-
-  const handleSaveFactCorrection = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingFact) return;
-    setSavingEdit(true);
-    try {
-      await api.updateFact(editingFact.id, editFactForm);
-      setEditFactModalOpen(false);
-      setEditingFact(null);
-      await loadData();
-    } catch (err: any) {
-      alert(`Correction error: ${err.message}`);
-    } finally {
-      setSavingEdit(false);
-    }
-  };
-
-  const handleReviewAsset = async (assetId: string, status: 'approved' | 'rejected') => {
-    try {
-      await api.reviewAsset(assetId, status);
-      await loadData();
-    } catch (err: any) {
-      alert(`Review error: ${err.message}`);
-    }
-  };
-
-  const handleTriggerRescore = async () => {
-    setRescoringTriggering(true);
-    try {
-      const res = await api.triggerRescoreJob({
-        knowledge_base_version_id: selectedKbVersionId || undefined
-      });
-      alert(`Simulation job launched successfully!\nEvaluated ${res.completed_items || res.total_items} historical assets against Version ${res.version_num}.\nAudit trails and historical manifests remain 100% immutable.`);
-      await loadData(true);
-      if (res.job_id) {
-        const fullJob = await api.getRescoreJob(res.job_id);
-        setSelectedRescoreJob(fullJob);
-      }
-    } catch (err: any) {
-      alert(`Simulation error: ${err.message}`);
-    } finally {
-      setRescoringTriggering(false);
-    }
-  };
-
-  const handleSelectRescoreJob = async (jobId: string) => {
-    try {
-      const fullJob = await api.getRescoreJob(jobId);
-      setSelectedRescoreJob(fullJob);
-    } catch (err: any) {
-      alert(`Error fetching job details: ${err.message}`);
-    }
-  };
-
-  const handleReprocessSource = async (sourceId: string, sourceTitle: string) => {
-    const ok = window.confirm(
-      `Reprocess '${sourceTitle}' using Gemini?\n\n` +
-      `Safety Guarantee:\n` +
-      `• All Approved, Rejected, and Reviewer-Edited records will be preserved.\n` +
-      `• Only unreviewed machine-generated candidates will be safely refreshed.\n\n` +
-      `Do you wish to proceed?`
-    );
-    if (!ok) return;
-
+  // Reprocess PDF Source Document Handler
+  const handleReprocessSource = async (sourceId: string) => {
+    if (!confirm("Reprocess this document with Gemini? Existing approved knowledge will be preserved.")) return;
     setReprocessingId(sourceId);
     try {
       const updated = await api.reprocessSource(sourceId);
-      alert(`Reprocessing complete!\n${updated.rules_count || 0} candidate rules and ${updated.facts_count || 0} facts now in Pending Review.`);
+      alert(`Reprocessing complete for '${updated.title}'. Extracted rules: ${updated.rules_count}, facts: ${updated.facts_count}.`);
       await loadData();
     } catch (err: any) {
       alert(`Reprocessing error: ${err.message}`);
@@ -510,51 +332,135 @@ export const KnowledgeLibrary: React.FC = () => {
     }
   };
 
-  const getSourceStatusBadge = (sourceStatus?: string) => {
-    switch (sourceStatus) {
-      case 'approved':
-        return <span style={{ background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', border: '1px solid rgba(59, 130, 246, 0.3)', padding: '2px 8px', borderRadius: 4, fontSize: '0.7rem', fontWeight: 600 }}>Source: Approved</span>;
-      case 'pending_review':
-        return <span style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', border: '1px solid rgba(245, 158, 11, 0.3)', padding: '2px 8px', borderRadius: 4, fontSize: '0.7rem', fontWeight: 600 }}>Source: Pending Review</span>;
-      case 'expired':
-        return <span style={{ background: 'rgba(234, 88, 12, 0.15)', color: '#fb923c', border: '1px solid rgba(234, 88, 12, 0.3)', padding: '2px 8px', borderRadius: 4, fontSize: '0.7rem', fontWeight: 600 }}>Source: Expired</span>;
-      case 'rejected':
-        return <span style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.3)', padding: '2px 8px', borderRadius: 4, fontSize: '0.7rem', fontWeight: 600 }}>Source: Rejected</span>;
-      default:
-        return null;
+  // Policy Impact Hub Trigger Simulation Handler
+  const handleTriggerRescore = async () => {
+    setRescoringTriggering(true);
+    try {
+      const payload: any = {};
+      if (selectedKbVersionId) {
+        payload.knowledge_base_version_id = selectedKbVersionId;
+      }
+      const job = await api.triggerRescoreJob(payload);
+      alert(`Policy Impact Simulation Job ${job.job_id} initiated! Processed ${job.total_items} historical ad items.`);
+      await loadData();
+      if (job && job.job_id) {
+        setSelectedRescoreJob(job);
+      }
+    } catch (err: any) {
+      alert(`Rescore simulation error: ${err.message}`);
+    } finally {
+      setRescoringTriggering(false);
     }
   };
 
-  const getEvidenceValidationBadge = (status?: string, pageNum?: number) => {
-    switch (status) {
-      case 'verified_exact':
-        return <span style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '2px 8px', borderRadius: 4, fontSize: '0.7rem', fontWeight: 600 }}>Verified (Page {pageNum || 'Doc'})</span>;
-      case 'verified_fuzzy':
-        return <span style={{ background: 'rgba(20, 184, 166, 0.15)', color: '#2dd4bf', border: '1px solid rgba(20, 184, 166, 0.3)', padding: '2px 8px', borderRadius: 4, fontSize: '0.7rem', fontWeight: 600 }}>Fuzzy Match (Page {pageNum || 'Doc'})</span>;
-      case 'page_mismatch':
-        return <span style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', border: '1px solid rgba(245, 158, 11, 0.3)', padding: '2px 8px', borderRadius: 4, fontSize: '0.7rem', fontWeight: 600 }}>Page Mismatch</span>;
-      case 'unverified':
-        return <span style={{ background: 'rgba(100, 116, 139, 0.2)', color: '#94a3b8', border: '1px solid rgba(100, 116, 139, 0.3)', padding: '2px 8px', borderRadius: 4, fontSize: '0.7rem', fontWeight: 600 }}>Unverified Citation</span>;
-      default:
-        return null;
-    }
-  };
+  // Check Primary Logo Activation Readiness
+  const approvedPrimaryLogo = useMemo(() => {
+    return assets.find(
+      (a) => (a.asset_type === 'logo' || a.asset_name.toLowerCase().includes('logo')) && a.status === 'approved'
+    );
+  }, [assets]);
 
-  const filteredRules = rules.filter(r => statusFilter === 'all' || r.status === statusFilter);
-  const filteredFacts = facts.filter(f => statusFilter === 'all' || f.status === statusFilter);
-  const filteredAssets = assets.filter(a => statusFilter === 'all' || a.status === statusFilter);
+  const anyLogo = useMemo(() => {
+    return assets.find(
+      (a) => a.asset_type === 'logo' || a.asset_name.toLowerCase().includes('logo')
+    );
+  }, [assets]);
+
+  // Filtered Products
+  const filteredProducts = useMemo(() => {
+    return products.filter((p) => {
+      const matchesSearch =
+        productSearch === '' ||
+        p.product_name.toLowerCase().includes(productSearch.toLowerCase()) ||
+        p.product_id.toLowerCase().includes(productSearch.toLowerCase()) ||
+        (p.sku && p.sku.toLowerCase().includes(productSearch.toLowerCase())) ||
+        p.product_category.toLowerCase().includes(productSearch.toLowerCase());
+
+      const matchesStatus =
+        productStatusFilter === 'all' ||
+        p.record_status.toLowerCase() === productStatusFilter.toLowerCase();
+
+      return matchesSearch && matchesStatus;
+    });
+  }, [products, productSearch, productStatusFilter]);
+
+  // Filtered Claims
+  const filteredClaims = useMemo(() => {
+    return claims.filter((c) => {
+      const matchesSearch =
+        claimSearch === '' ||
+        c.claim_id.toLowerCase().includes(claimSearch.toLowerCase()) ||
+        c.claim_text.toLowerCase().includes(claimSearch.toLowerCase()) ||
+        c.applicable_product_id.toLowerCase().includes(claimSearch.toLowerCase()) ||
+        c.applicable_market.toLowerCase().includes(claimSearch.toLowerCase());
+
+      const matchesStatus =
+        claimStatusFilter === 'all' ||
+        c.claim_status.toLowerCase() === claimStatusFilter.toLowerCase();
+
+      const matchesType =
+        claimTypeFilter === 'all' ||
+        c.claim_type.toLowerCase() === claimTypeFilter.toLowerCase();
+
+      return matchesSearch && matchesStatus && matchesType;
+    });
+  }, [claims, claimSearch, claimStatusFilter, claimTypeFilter]);
+
+  // Distinct Claim Types for filter
+  const distinctClaimTypes = useMemo(() => {
+    const types = new Set<string>();
+    claims.forEach((c) => {
+      if (c.claim_type) types.add(c.claim_type);
+    });
+    return Array.from(types).sort();
+  }, [claims]);
+
+  // Filtered Required Disclosures
+  const filteredDisclosures = useMemo(() => {
+    return disclosures.filter((d) => {
+      return (
+        disclosureSearch === '' ||
+        d.disclosure_id.toLowerCase().includes(disclosureSearch.toLowerCase()) ||
+        d.disclosure_text.toLowerCase().includes(disclosureSearch.toLowerCase()) ||
+        d.applicable_product_id.toLowerCase().includes(disclosureSearch.toLowerCase()) ||
+        d.applicable_market.toLowerCase().includes(disclosureSearch.toLowerCase()) ||
+        d.applies_when.toLowerCase().includes(disclosureSearch.toLowerCase())
+      );
+    });
+  }, [disclosures, disclosureSearch]);
+
+  // Filtered Brand Assets
+  const filteredAssets = useMemo(() => {
+    return assets.filter((a) => {
+      const isLogo = a.asset_type === 'logo' || a.asset_name.toLowerCase().includes('logo');
+      const matchesCategory =
+        assetCategoryFilter === 'all' ||
+        (assetCategoryFilter === 'logo' && isLogo) ||
+        (assetCategoryFilter === 'product_image' && a.asset_type === 'product_image') ||
+        (assetCategoryFilter === 'brand_graphic' && a.asset_type === 'brand_graphic') ||
+        (assetCategoryFilter === 'approved_asset' && !isLogo && a.asset_type !== 'product_image' && a.asset_type !== 'brand_graphic');
+
+      const matchesStatus =
+        assetStatusFilter === 'all' ||
+        a.status.toLowerCase() === assetStatusFilter.toLowerCase();
+
+      return matchesCategory && matchesStatus;
+    });
+  }, [assets, assetCategoryFilter, assetStatusFilter]);
 
   return (
     <div>
-      {/* Header */}
-      <div className="flex-between" style={{ marginBottom: 20 }}>
+      {/* Top Header with Mandatory Controls Preserved */}
+      <div className="flex-between" style={{ marginBottom: 20, flexWrap: 'wrap', gap: 16 }}>
         <div>
           <h1 className="title-xl">Knowledge Library & Brand Governance</h1>
           <p className="text-sub">
-            Brand guidelines, approved product facts, and creative assets. Only <strong>Approved</strong> records are authoritative.
+            Authoritative Product Catalogue, Claims Register, approved Brand Assets, and source documentation.
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 10 }}>
+
+        {/* 1. Mandatory Top-Level Buttons (Preserved Exactly) */}
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
           <button
             onClick={() => setBrandProfileModalOpen(true)}
             className="btn btn-secondary"
@@ -580,305 +486,470 @@ export const KnowledgeLibrary: React.FC = () => {
             <ShieldCheck size={15} color="#60a5fa" />
             {activating ? 'Activating...' : 'Activate Version'}
           </button>
-        </div>
-      </div>
 
-      {/* Pending Knowledge Notice */}
-      <div style={{ padding: '12px 18px', background: 'rgba(245, 158, 11, 0.08)', borderRadius: 10, border: '1px solid rgba(245, 158, 11, 0.25)', marginBottom: 24, display: 'flex', alignItems: 'center', gap: 12 }}>
-        <AlertCircle size={20} color="#fbbf24" />
-        <div style={{ fontSize: '0.82rem', color: '#fef3c7' }}>
-          <strong>Core Governance Principle:</strong> Newly uploaded documents and Gemini-extracted candidates start in a <strong>pending review</strong> state. Uploading never auto-approves knowledge. Knowledge Reviewers can correct, approve, or reject candidate facts before the governance engine uses them.
-        </div>
-      </div>
-
-      {/* Tabs and Filter Bar */}
-      <div className="flex-between" style={{ borderBottom: '1px solid var(--border-subtle)', paddingBottom: 12, marginBottom: 20 }}>
-        <div style={{ display: 'flex', gap: 8 }}>
+          {/* Relocated Policy Impact Hub Action */}
           <button
-            onClick={() => setActiveTab('rules')}
-            className={`tab-btn ${activeTab === 'rules' ? 'active' : ''}`}
+            onClick={() => setRescoreModalOpen(true)}
+            className="btn btn-secondary"
+            style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.82rem', borderColor: 'rgba(167, 139, 250, 0.4)' }}
           >
-            Brand Rules ({rules.length})
-          </button>
-          <button
-            onClick={() => setActiveTab('facts')}
-            className={`tab-btn ${activeTab === 'facts' ? 'active' : ''}`}
-          >
-            Product Facts & Claims ({facts.length})
-          </button>
-          <button
-            onClick={() => setActiveTab('assets')}
-            className={`tab-btn ${activeTab === 'assets' ? 'active' : ''}`}
-          >
-            Brand Assets ({assets.length})
-          </button>
-          <button
-            onClick={() => setActiveTab('sources')}
-            className={`tab-btn ${activeTab === 'sources' ? 'active' : ''}`}
-          >
-            Uploaded Sources ({sources.length})
-          </button>
-          <button
-            onClick={() => setActiveTab('rescore')}
-            className={`tab-btn ${activeTab === 'rescore' ? 'active' : ''}`}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-          >
-            <RefreshCw size={13} />
-            Impact Rescoring Hub
+            <RefreshCw size={14} color="#c084fc" />
+            Policy Impact Hub
             {rescoreJobs.length > 0 && (
-              <span style={{ fontSize: '0.68rem', padding: '1px 6px', borderRadius: 999, background: 'rgba(99, 102, 241, 0.25)', color: '#a5b4fc', border: '1px solid rgba(99, 102, 241, 0.4)' }}>
+              <span style={{ fontSize: '0.68rem', padding: '1px 6px', borderRadius: 999, background: 'rgba(167, 139, 250, 0.25)', color: '#e9d5ff' }}>
                 {rescoreJobs.length}
               </span>
             )}
           </button>
         </div>
+      </div>
 
-        {/* Status Filter and Actions */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {isReviewer && (
-            <button
-              onClick={handleOpenAddRule}
-              className="btn btn-primary"
-              style={{ padding: '6px 12px', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: 6 }}
-            >
-              <Plus size={14} />
-              Add Rule
-            </button>
-          )}
-          <Filter size={14} color="var(--text-dim)" />
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="select"
-            style={{ width: 'auto', padding: '6px 12px', fontSize: '0.8rem' }}
+      {/* 2. Primary Tab Bar: EXACTLY THREE PRIMARY TABS */}
+      <div style={{ borderBottom: '1px solid var(--border-subtle)', marginBottom: 20 }}>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            onClick={() => handleTabChange('facts')}
+            className={`tab-btn ${activeTab === 'facts' ? 'active' : ''}`}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}
           >
-            <option value="all">All Statuses</option>
-            <option value="pending_review">Pending Review</option>
-            <option value="approved">Approved Only</option>
-            <option value="rejected">Rejected</option>
-          </select>
+            <Package size={15} />
+            Product Facts & Claims ({products.length + claims.length + disclosures.length})
+          </button>
+          <button
+            onClick={() => handleTabChange('assets')}
+            className={`tab-btn ${activeTab === 'assets' ? 'active' : ''}`}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}
+          >
+            <ImageIcon size={15} />
+            Brand Assets ({assets.length})
+          </button>
+          <button
+            onClick={() => handleTabChange('sources')}
+            className={`tab-btn ${activeTab === 'sources' ? 'active' : ''}`}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}
+          >
+            <FileText size={15} />
+            Uploaded Sources ({sources.length + stagedImports.length})
+          </button>
         </div>
       </div>
 
-      {/* Tab 1: Brand Rules */}
-      {activeTab === 'rules' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {filteredRules.length === 0 ? (
-            <div className="card" style={{ textAlign: 'center', padding: 40, color: 'var(--text-dim)' }}>
-              No rules found for filter '{statusFilter}'.
-            </div>
-          ) : (
-            filteredRules.map((rule) => (
-              <div key={rule.id} className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', border: rule.is_corrected ? '1px solid rgba(168, 85, 247, 0.4)' : undefined }}>
-                <div style={{ flex: 1 }}>
-                  {/* Header badges */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    {rule.rule_code && (
-                      <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '0.85rem', color: '#38bdf8', background: 'rgba(56, 189, 248, 0.1)', padding: '2px 8px', borderRadius: 4 }}>
-                        {rule.rule_code}
-                      </span>
-                    )}
-                    <span style={{ fontWeight: 700, fontSize: '1rem', color: '#fff' }}>{rule.title}</span>
-                    <StatusBadge status={rule.status} />
-                    {getExtractionMethodBadge(rule)}
-                    {getSourceStatusBadge(rule.source_status)}
-                    {getEvidenceValidationBadge(rule.evidence_validation, rule.page_number)}
-                    {rule.is_corrected && (
-                      <span style={{ background: 'rgba(168, 85, 247, 0.15)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.3)', padding: '2px 8px', borderRadius: 4, fontSize: '0.7rem', fontWeight: 600 }}>
-                        Reviewer Edited
-                      </span>
-                    )}
-                    <span className={`badge badge-${rule.severity === 'critical' ? 'danger' : 'warning'}`}>
-                      {rule.severity}
-                    </span>
-                    <span className="badge badge-neutral">
-                      {rule.rule_type.replace(/_/g, ' ')}
-                    </span>
-                  </div>
-
-                  {/* Statement */}
-                  <div style={{ marginTop: 10, fontSize: '0.88rem', color: '#f1f5f9', lineHeight: 1.5 }}>
-                    <strong>Requirement:</strong> {rule.explanation}
-                  </div>
-
-                  {/* Rationale / Why it matters */}
-                  {rule.rationale && (
-                    <div style={{ marginTop: 6, fontSize: '0.82rem', color: '#94a3b8' }}>
-                      <strong style={{ color: '#cbd5e1' }}>Rationale:</strong> {rule.rationale}
-                    </div>
-                  )}
-
-                  {/* Evidence Passage */}
-                  {rule.evidence_passage && (
-                    <div style={{ marginTop: 8, padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 6, borderLeft: '3px solid #818cf8', fontSize: '0.8rem', color: '#cbd5e1', fontStyle: 'italic' }}>
-                      <Quote size={12} style={{ display: 'inline', marginRight: 6, verticalAlign: 'middle', color: '#818cf8' }} />
-                      "{rule.evidence_passage}"
-                    </div>
-                  )}
-
-                  {/* Uncertainty / Warning notice */}
-                  {rule.uncertainty_notes && (
-                    <div style={{ marginTop: 8, padding: '6px 10px', background: 'rgba(245, 158, 11, 0.1)', borderRadius: 4, fontSize: '0.78rem', color: '#fbbf24', display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <AlertTriangle size={14} />
-                      <span>{rule.uncertainty_notes}</span>
-                    </div>
-                  )}
-
-                  {/* Metadata line */}
-                  <div style={{ display: 'flex', gap: 16, marginTop: 10, fontSize: '0.75rem', color: 'var(--text-dim)', flexWrap: 'wrap' }}>
-                    <div>Pattern: <code style={{ color: '#a5b4fc', background: 'rgba(255,255,255,0.05)', padding: '2px 6px', borderRadius: 4 }}>{rule.pattern}</code></div>
-                    <div>Citation: <span style={{ color: 'var(--text-muted)' }}>{rule.source_citation || 'Brand Guidelines'}</span></div>
-                    {rule.reviewed_at && (
-                      <div>Reviewed: <span style={{ color: 'var(--text-muted)' }}>{new Date(rule.reviewed_at).toLocaleDateString()}</span></div>
-                    )}
-                  </div>
-                  {rule.review_notes && (
-                    <div style={{ marginTop: 6, fontSize: '0.75rem', color: '#94a3b8', fontStyle: 'italic' }}>
-                      Review Notes: "{rule.review_notes}"
-                    </div>
-                  )}
-                </div>
-
-                {/* Reviewer Action Buttons */}
-                {isReviewer && rule.status === 'pending_review' && (
-                  <div style={{ display: 'flex', gap: 8, marginLeft: 16 }}>
-                    <button
-                      onClick={() => handleOpenEditRule(rule)}
-                      className="btn btn-secondary"
-                      style={{ padding: '6px 10px', fontSize: '0.75rem' }}
-                      title="Correct rule wording or fields before approving"
-                    >
-                      <Edit3 size={13} /> Correct
-                    </button>
-                    <button
-                      onClick={() => handleReviewRule(rule.id, 'approved')}
-                      className="btn btn-success"
-                      style={{ padding: '6px 12px', fontSize: '0.75rem' }}
-                    >
-                      <Check size={14} /> Approve Rule
-                    </button>
-                    <button
-                      onClick={() => handleReviewRule(rule.id, 'rejected')}
-                      className="btn btn-danger"
-                      style={{ padding: '6px 12px', fontSize: '0.75rem' }}
-                    >
-                      <X size={14} /> Reject
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))
-          )}
-        </div>
-      )}
-
-      {/* Tab 2: Product Facts */}
+      {/* ===================================================================== */}
+      {/* PRIMARY TAB 1: PRODUCT FACTS & CLAIMS (Default) */}
+      {/* ===================================================================== */}
       {activeTab === 'facts' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {filteredFacts.length === 0 ? (
-            <div className="card" style={{ textAlign: 'center', padding: 40, color: 'var(--text-dim)' }}>
-              No product facts found for filter '{statusFilter}'.
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* Sub-Tab Navigation Bar */}
+          <div className="flex-between" style={{ alignItems: 'center', background: 'rgba(15, 23, 42, 0.5)', padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border-subtle)' }}>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button
+                onClick={() => setFactsSubTab('products')}
+                className={`btn ${factsSubTab === 'products' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ padding: '6px 14px', fontSize: '0.82rem', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              >
+                <Package size={14} />
+                Products ({products.length})
+              </button>
+              <button
+                onClick={() => setFactsSubTab('claims')}
+                className={`btn ${factsSubTab === 'claims' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ padding: '6px 14px', fontSize: '0.82rem', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              >
+                <ShieldCheck size={14} />
+                Claims ({claims.length})
+              </button>
+              <button
+                onClick={() => setFactsSubTab('disclosures')}
+                className={`btn ${factsSubTab === 'disclosures' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ padding: '6px 14px', fontSize: '0.82rem', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              >
+                <AlertCircle size={14} />
+                Required Disclosures ({disclosures.length})
+              </button>
             </div>
-          ) : (
-            filteredFacts.map((fact) => (
-              <div key={fact.id} className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', border: fact.is_corrected ? '1px solid rgba(168, 85, 247, 0.4)' : undefined }}>
-                <div style={{ flex: 1 }}>
-                  {/* Header badges */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    {fact.product_id && (
-                      <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '0.85rem', color: '#38bdf8', background: 'rgba(56, 189, 248, 0.1)', padding: '2px 8px', borderRadius: 4 }}>
-                        {fact.product_id}
-                      </span>
-                    )}
-                    <span style={{ fontWeight: 700, fontSize: '0.98rem', color: '#fff' }}>
-                      {fact.product_name} — {fact.fact_key}
-                    </span>
-                    <StatusBadge status={fact.status} />
-                    {getSourceStatusBadge(fact.source_status)}
-                    {getEvidenceValidationBadge(fact.evidence_validation, fact.page_number)}
-                    {fact.is_corrected && (
-                      <span style={{ background: 'rgba(168, 85, 247, 0.15)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.3)', padding: '2px 8px', borderRadius: 4, fontSize: '0.7rem', fontWeight: 600 }}>
-                        Reviewer Edited
-                      </span>
-                    )}
-                    <span className="badge badge-info">{fact.category}</span>
-                  </div>
 
-                  {/* Specification Value */}
-                  <div style={{ marginTop: 10, fontSize: '0.92rem', color: '#e2e8f0', fontWeight: 600 }}>
-                    Value / Decision: <span style={{ color: fact.value_status === 'missing_not_provided' ? '#fbbf24' : '#34d399' }}>"{fact.fact_value}"</span>
-                  </div>
+            <button
+              onClick={() => setExcelModalOpen(true)}
+              className="btn btn-secondary"
+              style={{ fontSize: '0.78rem', padding: '5px 10px', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            >
+              <FileSpreadsheet size={13} color="#34d399" />
+              Upload Updated Excel
+            </button>
+          </div>
 
-                  {/* Supporting Evidence */}
-                  {fact.supporting_evidence && (
-                    <div style={{ marginTop: 8, padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 6, borderLeft: '3px solid #10b981', fontSize: '0.8rem', color: '#cbd5e1', fontStyle: 'italic' }}>
-                      <Quote size={12} style={{ display: 'inline', marginRight: 6, verticalAlign: 'middle', color: '#10b981' }} />
-                      "{fact.supporting_evidence}"
-                    </div>
-                  )}
-
-                  {/* Data Gap / Uncertainty Notice */}
-                  {fact.uncertainty_notes && (
-                    <div style={{ marginTop: 8, padding: '6px 10px', background: 'rgba(245, 158, 11, 0.1)', borderRadius: 4, fontSize: '0.78rem', color: '#fbbf24', display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <AlertTriangle size={14} />
-                      <span>{fact.uncertainty_notes}</span>
-                    </div>
-                  )}
-
-                  {/* Metadata line */}
-                  <div style={{ display: 'flex', gap: 16, marginTop: 10, fontSize: '0.75rem', color: 'var(--text-dim)', flexWrap: 'wrap' }}>
-                    <div>Citation: <span style={{ color: 'var(--text-muted)' }}>{fact.source_citation || 'Product Knowledge Spec'}</span></div>
-                    {fact.valid_until && (
-                      <div>Valid Until: <span style={{ color: '#f59e0b' }}>{new Date(fact.valid_until).toLocaleDateString()}</span></div>
-                    )}
-                  </div>
-                  {fact.review_notes && (
-                    <div style={{ marginTop: 6, fontSize: '0.75rem', color: '#94a3b8', fontStyle: 'italic' }}>
-                      Reviewer Note: "{fact.review_notes}"
-                    </div>
-                  )}
+          {/* SUB-TAB 1: PRODUCTS */}
+          {factsSubTab === 'products' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {/* Filter controls */}
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                <div style={{ position: 'relative', flex: 1, minWidth: 240 }}>
+                  <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-dim)' }} />
+                  <input
+                    type="text"
+                    placeholder="Search products by name, product ID, SKU, or category..."
+                    value={productSearch}
+                    onChange={(e) => setProductSearch(e.target.value)}
+                    className="input"
+                    style={{ paddingLeft: 32, fontSize: '0.82rem' }}
+                  />
                 </div>
-
-                {isReviewer && fact.status === 'pending_review' && (
-                  <div style={{ display: 'flex', gap: 8, marginLeft: 16 }}>
-                    <button
-                      onClick={() => handleOpenEditFact(fact)}
-                      className="btn btn-secondary"
-                      style={{ padding: '6px 10px', fontSize: '0.75rem' }}
-                      title="Correct fact value or specification before approving"
-                    >
-                      <Edit3 size={13} /> Correct
-                    </button>
-                    <button
-                      onClick={() => handleReviewFact(fact.id, 'approved')}
-                      className="btn btn-success"
-                      style={{ padding: '6px 12px', fontSize: '0.75rem' }}
-                    >
-                      <Check size={14} /> Approve Fact
-                    </button>
-                    <button
-                      onClick={() => handleReviewFact(fact.id, 'rejected')}
-                      className="btn btn-danger"
-                      style={{ padding: '6px 12px', fontSize: '0.75rem' }}
-                    >
-                      <X size={14} /> Reject
-                    </button>
-                  </div>
-                )}
+                <select
+                  value={productStatusFilter}
+                  onChange={(e) => setProductStatusFilter(e.target.value)}
+                  className="input"
+                  style={{ width: 160, fontSize: '0.82rem' }}
+                >
+                  <option value="all">All Statuses</option>
+                  <option value="Active">Active</option>
+                  <option value="Inactive">Inactive</option>
+                  <option value="Discontinued">Discontinued</option>
+                </select>
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-dim)' }}>
+                  Showing {filteredProducts.length} of {products.length} products
+                </span>
               </div>
-            ))
+
+              {/* Products Table */}
+              <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.82rem' }}>
+                    <thead>
+                      <tr style={{ background: 'rgba(30, 41, 59, 0.7)', borderBottom: '1px solid var(--border-subtle)', color: 'var(--text-dim)' }}>
+                        <th style={{ padding: '10px 14px', fontWeight: 600 }}>Product Name</th>
+                        <th style={{ padding: '10px 14px', fontWeight: 600 }}>Product ID</th>
+                        <th style={{ padding: '10px 14px', fontWeight: 600 }}>Category</th>
+                        <th style={{ padding: '10px 14px', fontWeight: 600 }}>Offering Type</th>
+                        <th style={{ padding: '10px 14px', fontWeight: 600 }}>SKU / Variant</th>
+                        <th style={{ padding: '10px 14px', fontWeight: 600 }}>Market</th>
+                        <th style={{ padding: '10px 14px', fontWeight: 600 }}>Status</th>
+                        <th style={{ padding: '10px 14px', fontWeight: 600, textAlign: 'right' }}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredProducts.length === 0 ? (
+                        <tr>
+                          <td colSpan={8} style={{ padding: 36, textAlign: 'center', color: 'var(--text-dim)' }}>
+                            <Package size={32} style={{ margin: '0 auto 8px', opacity: 0.5 }} />
+                            <div>No products found matching the criteria.</div>
+                            {products.length === 0 && (
+                              <button
+                                onClick={() => setExcelModalOpen(true)}
+                                className="btn btn-secondary"
+                                style={{ marginTop: 12, fontSize: '0.8rem' }}
+                              >
+                                <FileSpreadsheet size={14} style={{ marginRight: 6 }} /> Import Product Catalogue
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredProducts.map((p) => (
+                          <tr
+                            key={p.id}
+                            style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)', transition: 'background 0.15s' }}
+                            className="table-row-hover"
+                          >
+                            <td style={{ padding: '10px 14px', fontWeight: 600, color: '#f8fafc' }}>
+                              {p.product_name}
+                            </td>
+                            <td style={{ padding: '10px 14px' }}>
+                              <span style={{ fontFamily: 'monospace', background: 'rgba(255,255,255,0.06)', padding: '2px 6px', borderRadius: 4, color: '#93c5fd' }}>
+                                {p.product_id}
+                              </span>
+                            </td>
+                            <td style={{ padding: '10px 14px', color: 'var(--text-sub)' }}>
+                              {p.product_category}
+                            </td>
+                            <td style={{ padding: '10px 14px', color: 'var(--text-sub)' }}>
+                              {p.offering_type}
+                            </td>
+                            <td style={{ padding: '10px 14px', color: 'var(--text-dim)' }}>
+                              {p.sku || p.variant_name || '—'}
+                            </td>
+                            <td style={{ padding: '10px 14px', color: 'var(--text-sub)' }}>
+                              {p.applicable_market}
+                            </td>
+                            <td style={{ padding: '10px 14px' }}>
+                              <span className={`badge ${p.record_status === 'Active' ? 'badge-success' : 'badge-neutral'}`}>
+                                {p.record_status}
+                              </span>
+                            </td>
+                            <td style={{ padding: '10px 14px', textAlign: 'right' }}>
+                              <button
+                                onClick={() => setSelectedProduct(p)}
+                                className="btn btn-secondary"
+                                style={{ padding: '4px 10px', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                              >
+                                <Eye size={12} /> View Details
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* SUB-TAB 2: CLAIMS */}
+          {factsSubTab === 'claims' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {/* Filter controls */}
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                <div style={{ position: 'relative', flex: 1, minWidth: 240 }}>
+                  <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-dim)' }} />
+                  <input
+                    type="text"
+                    placeholder="Search claims by ID, claim text, or associated product..."
+                    value={claimSearch}
+                    onChange={(e) => setClaimSearch(e.target.value)}
+                    className="input"
+                    style={{ paddingLeft: 32, fontSize: '0.82rem' }}
+                  />
+                </div>
+                <select
+                  value={claimStatusFilter}
+                  onChange={(e) => setClaimStatusFilter(e.target.value)}
+                  className="input"
+                  style={{ width: 160, fontSize: '0.82rem' }}
+                >
+                  <option value="all">All Statuses</option>
+                  <option value="Approved">Approved</option>
+                  <option value="Restricted">Restricted</option>
+                  <option value="Prohibited">Prohibited</option>
+                </select>
+                <select
+                  value={claimTypeFilter}
+                  onChange={(e) => setClaimTypeFilter(e.target.value)}
+                  className="input"
+                  style={{ width: 160, fontSize: '0.82rem' }}
+                >
+                  <option value="all">All Types</option>
+                  {distinctClaimTypes.map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-dim)' }}>
+                  Showing {filteredClaims.length} of {claims.length} claims
+                </span>
+              </div>
+
+              {/* Claims Table */}
+              <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.82rem' }}>
+                    <thead>
+                      <tr style={{ background: 'rgba(30, 41, 59, 0.7)', borderBottom: '1px solid var(--border-subtle)', color: 'var(--text-dim)' }}>
+                        <th style={{ padding: '10px 14px', fontWeight: 600 }}>Claim ID</th>
+                        <th style={{ padding: '10px 14px', fontWeight: 600, minWidth: 260 }}>Claim Text</th>
+                        <th style={{ padding: '10px 14px', fontWeight: 600 }}>Type</th>
+                        <th style={{ padding: '10px 14px', fontWeight: 600 }}>Status</th>
+                        <th style={{ padding: '10px 14px', fontWeight: 600 }}>Associated Product</th>
+                        <th style={{ padding: '10px 14px', fontWeight: 600 }}>Market</th>
+                        <th style={{ padding: '10px 14px', fontWeight: 600 }}>Effective Dates</th>
+                        <th style={{ padding: '10px 14px', fontWeight: 600, textAlign: 'right' }}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredClaims.length === 0 ? (
+                        <tr>
+                          <td colSpan={8} style={{ padding: 36, textAlign: 'center', color: 'var(--text-dim)' }}>
+                            <ShieldCheck size={32} style={{ margin: '0 auto 8px', opacity: 0.5 }} />
+                            <div>No claims found matching the criteria.</div>
+                            {claims.length === 0 && (
+                              <button
+                                onClick={() => setExcelModalOpen(true)}
+                                className="btn btn-secondary"
+                                style={{ marginTop: 12, fontSize: '0.8rem' }}
+                              >
+                                <FileSpreadsheet size={14} style={{ marginRight: 6 }} /> Import Claims Register
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredClaims.map((c) => {
+                          const statusBadgeClass =
+                            c.claim_status === 'Approved'
+                              ? 'badge-success'
+                              : c.claim_status === 'Restricted'
+                              ? 'badge-warning'
+                              : 'badge-danger';
+
+                          return (
+                            <tr
+                              key={c.id}
+                              style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}
+                              className="table-row-hover"
+                            >
+                              <td style={{ padding: '10px 14px' }}>
+                                <span style={{ fontFamily: 'monospace', fontWeight: 600, color: '#a5b4fc', background: 'rgba(99, 102, 241, 0.1)', padding: '2px 6px', borderRadius: 4 }}>
+                                  {c.claim_id}
+                                </span>
+                              </td>
+                              <td style={{ padding: '10px 14px', color: '#f8fafc', maxWidth: 360 }}>
+                                <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {c.claim_text}
+                                </div>
+                              </td>
+                              <td style={{ padding: '10px 14px' }}>
+                                <span className="badge badge-neutral" style={{ fontSize: '0.72rem' }}>
+                                  {c.claim_type}
+                                </span>
+                              </td>
+                              <td style={{ padding: '10px 14px' }}>
+                                <span className={`badge ${statusBadgeClass}`}>
+                                  {c.claim_status}
+                                </span>
+                              </td>
+                              <td style={{ padding: '10px 14px', fontFamily: 'monospace', fontSize: '0.78rem', color: '#93c5fd' }}>
+                                {c.applicable_product_id}
+                              </td>
+                              <td style={{ padding: '10px 14px', color: 'var(--text-sub)' }}>
+                                {c.applicable_market}
+                              </td>
+                              <td style={{ padding: '10px 14px', color: 'var(--text-dim)', fontSize: '0.75rem' }}>
+                                {c.effective_from} → {c.effective_until || 'Indefinite'}
+                              </td>
+                              <td style={{ padding: '10px 14px', textAlign: 'right' }}>
+                                <button
+                                  onClick={() => setSelectedClaim(c)}
+                                  className="btn btn-secondary"
+                                  style={{ padding: '4px 10px', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                                >
+                                  <Eye size={12} /> View Details
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* SUB-TAB 3: REQUIRED DISCLOSURES */}
+          {factsSubTab === 'disclosures' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {/* Filter controls */}
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                <div style={{ position: 'relative', flex: 1, minWidth: 240 }}>
+                  <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-dim)' }} />
+                  <input
+                    type="text"
+                    placeholder="Search disclosures by ID, text, applies when, or market..."
+                    value={disclosureSearch}
+                    onChange={(e) => setDisclosureSearch(e.target.value)}
+                    className="input"
+                    style={{ paddingLeft: 32, fontSize: '0.82rem' }}
+                  />
+                </div>
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-dim)' }}>
+                  Showing {filteredDisclosures.length} of {disclosures.length} disclosures
+                </span>
+              </div>
+
+              {/* Disclosures Table */}
+              <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.82rem' }}>
+                    <thead>
+                      <tr style={{ background: 'rgba(30, 41, 59, 0.7)', borderBottom: '1px solid var(--border-subtle)', color: 'var(--text-dim)' }}>
+                        <th style={{ padding: '10px 14px', fontWeight: 600 }}>Disclosure ID</th>
+                        <th style={{ padding: '10px 14px', fontWeight: 600, minWidth: 260 }}>Disclosure Text</th>
+                        <th style={{ padding: '10px 14px', fontWeight: 600 }}>Associated Product</th>
+                        <th style={{ padding: '10px 14px', fontWeight: 600 }}>Market</th>
+                        <th style={{ padding: '10px 14px', fontWeight: 600, minWidth: 200 }}>Applies When</th>
+                        <th style={{ padding: '10px 14px', fontWeight: 600 }}>Effective Dates</th>
+                        <th style={{ padding: '10px 14px', fontWeight: 600, textAlign: 'right' }}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredDisclosures.length === 0 ? (
+                        <tr>
+                          <td colSpan={7} style={{ padding: 36, textAlign: 'center', color: 'var(--text-dim)' }}>
+                            <AlertCircle size={32} style={{ margin: '0 auto 8px', opacity: 0.5 }} />
+                            <div>No required disclosures found matching the criteria.</div>
+                            {disclosures.length === 0 && (
+                              <button
+                                onClick={() => setExcelModalOpen(true)}
+                                className="btn btn-secondary"
+                                style={{ marginTop: 12, fontSize: '0.8rem' }}
+                              >
+                                <FileSpreadsheet size={14} style={{ marginRight: 6 }} /> Import Disclosures
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredDisclosures.map((d) => (
+                          <tr
+                            key={d.id}
+                            style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}
+                            className="table-row-hover"
+                          >
+                            <td style={{ padding: '10px 14px' }}>
+                              <span style={{ fontFamily: 'monospace', fontWeight: 600, color: '#f59e0b', background: 'rgba(245, 158, 11, 0.1)', padding: '2px 6px', borderRadius: 4 }}>
+                                {d.disclosure_id}
+                              </span>
+                            </td>
+                            <td style={{ padding: '10px 14px', color: '#f8fafc', maxWidth: 360 }}>
+                              <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {d.disclosure_text}
+                              </div>
+                            </td>
+                            <td style={{ padding: '10px 14px', fontFamily: 'monospace', fontSize: '0.78rem', color: '#93c5fd' }}>
+                              {d.applicable_product_id}
+                            </td>
+                            <td style={{ padding: '10px 14px', color: 'var(--text-sub)' }}>
+                              {d.applicable_market}
+                            </td>
+                            <td style={{ padding: '10px 14px', color: '#fde68a', fontSize: '0.78rem' }}>
+                              <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 220 }}>
+                                {d.applies_when}
+                              </div>
+                            </td>
+                            <td style={{ padding: '10px 14px', color: 'var(--text-dim)', fontSize: '0.75rem' }}>
+                              {d.effective_from} → {d.effective_until || 'Indefinite'}
+                            </td>
+                            <td style={{ padding: '10px 14px', textAlign: 'right' }}>
+                              <button
+                                onClick={() => setSelectedDisclosure(d)}
+                                className="btn btn-secondary"
+                                style={{ padding: '4px 10px', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                              >
+                                <Eye size={12} /> View Details
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
           )}
         </div>
       )}
 
-      {/* Tab 3: Brand Assets */}
+      {/* ===================================================================== */}
+      {/* PRIMARY TAB 2: BRAND ASSETS */}
+      {/* ===================================================================== */}
       {activeTab === 'assets' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div className="flex-between" style={{ alignItems: 'center', marginBottom: 4 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {/* Header & Upload Action */}
+          <div className="flex-between" style={{ alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
             <div>
-              <h3 style={{ margin: 0, fontSize: '1.05rem', color: '#fff' }}>Brand Asset Library</h3>
-              <p style={{ margin: '4px 0 0 0', fontSize: '0.78rem', color: 'var(--text-dim)' }}>
-                Official brand logos, product photography, and approved reference creatives used for visual governance checks.
+              <h3 style={{ margin: 0, fontSize: '1.15rem', color: '#fff' }}>Official Brand Assets & Logos</h3>
+              <p style={{ margin: '4px 0 0 0', fontSize: '0.82rem', color: 'var(--text-dim)' }}>
+                Approved brand logos, product photography, and reference graphics. These assets power automated visual governance checks.
               </p>
             </div>
             {isReviewer && (
@@ -886,82 +957,295 @@ export const KnowledgeLibrary: React.FC = () => {
                 onClick={() => {
                   setAssetFile(null);
                   setAssetTitle('');
+                  setAssetCategory('logo');
+                  setAssetUsageNotes('');
                   setAssetModalOpen(true);
                 }}
                 className="btn btn-primary"
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.82rem' }}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.85rem' }}
               >
                 <Upload size={14} /> Upload Brand Asset
               </button>
             )}
           </div>
 
+          {/* Primary Logo Activation Readiness Banner */}
+          {approvedPrimaryLogo ? (
+            <div style={{ padding: '14px 18px', background: 'rgba(34, 197, 94, 0.1)', borderRadius: 10, border: '1px solid rgba(34, 197, 94, 0.3)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <CheckCircle size={22} color="#4ade80" />
+                <div>
+                  <div style={{ fontSize: '0.88rem', fontWeight: 600, color: '#f0fdf4' }}>
+                    ⭐ Primary Brand Logo Approved & Activation-Ready
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: '#bbf7d0', marginTop: 2 }}>
+                    "{approvedPrimaryLogo.asset_name}" is active. Visual governance will enforce logo presence, {approvedPrimaryLogo.min_clearance_px || 20}px minimum clearance, and aspect ratio integrity.
+                  </div>
+                </div>
+              </div>
+              <span className="badge badge-success">Ready for Activation</span>
+            </div>
+          ) : anyLogo ? (
+            <div style={{ padding: '14px 18px', background: 'rgba(245, 158, 11, 0.1)', borderRadius: 10, border: '1px solid rgba(245, 158, 11, 0.3)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <AlertTriangle size={22} color="#fbbf24" />
+                <div>
+                  <div style={{ fontSize: '0.88rem', fontWeight: 600, color: '#fffbeb' }}>
+                    Primary Logo Uploaded but Pending Approval
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: '#fde68a', marginTop: 2 }}>
+                    A logo asset has been uploaded ({anyLogo.asset_name}) but has not been approved yet. Please approve it below before activating a new Knowledge Base version.
+                  </div>
+                </div>
+              </div>
+              {isReviewer && anyLogo.status === 'pending_review' && (
+                <button
+                  onClick={() => handleReviewAsset(anyLogo.id, 'approved')}
+                  className="btn btn-success"
+                  style={{ fontSize: '0.8rem', padding: '6px 14px', whiteSpace: 'nowrap' }}
+                >
+                  <Check size={14} style={{ marginRight: 6 }} /> Approve Logo
+                </button>
+              )}
+            </div>
+          ) : (
+            <div style={{ padding: '14px 18px', background: 'rgba(245, 158, 11, 0.1)', borderRadius: 10, border: '1px solid rgba(245, 158, 11, 0.3)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <AlertTriangle size={22} color="#fbbf24" />
+                <div>
+                  <div style={{ fontSize: '0.88rem', fontWeight: 600, color: '#fffbeb' }}>
+                    Primary Logo Missing — Required for Activation Readiness
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: '#fde68a', marginTop: 2 }}>
+                    An approved Primary Logo is strongly recommended for visual governance and automated template matching before activating a new Knowledge Base version.
+                  </div>
+                </div>
+              </div>
+              {isReviewer && (
+                <button
+                  onClick={() => {
+                    setAssetFile(null);
+                    setAssetTitle('');
+                    setAssetCategory('logo');
+                    setAssetUsageNotes('');
+                    setAssetModalOpen(true);
+                  }}
+                  className="btn btn-primary"
+                  style={{ fontSize: '0.8rem', padding: '6px 14px', whiteSpace: 'nowrap' }}
+                >
+                  <Upload size={14} style={{ marginRight: 6 }} /> Upload Primary Logo
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Filter Bar for Assets */}
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+            <select
+              value={assetCategoryFilter}
+              onChange={(e) => setAssetCategoryFilter(e.target.value)}
+              className="input"
+              style={{ width: 220, fontSize: '0.82rem' }}
+            >
+              <option value="all">All Asset Categories</option>
+              <option value="logo">⭐ Primary Logo</option>
+              <option value="product_image">Product Images</option>
+              <option value="brand_graphic">Brand Graphics</option>
+              <option value="approved_asset">Other Approved Assets</option>
+            </select>
+            <select
+              value={assetStatusFilter}
+              onChange={(e) => setAssetStatusFilter(e.target.value)}
+              className="input"
+              style={{ width: 160, fontSize: '0.82rem' }}
+            >
+              <option value="all">All Statuses</option>
+              <option value="approved">Approved</option>
+              <option value="pending_review">Pending Review</option>
+              <option value="rejected">Rejected</option>
+            </select>
+            <span style={{ fontSize: '0.78rem', color: 'var(--text-dim)' }}>
+              Showing {filteredAssets.length} of {assets.length} assets
+            </span>
+          </div>
+
+          {/* Asset Card Grid */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
             {filteredAssets.length === 0 ? (
-              <div className="card" style={{ gridColumn: '1 / -1', textAlign: 'center', padding: 40, color: 'var(--text-dim)' }}>
-                No brand assets found for filter '{statusFilter}'.
+              <div className="card" style={{ gridColumn: '1 / -1', textAlign: 'center', padding: 48, color: 'var(--text-dim)' }}>
+                <ImageIcon size={36} style={{ margin: '0 auto 12px', opacity: 0.5 }} />
+                <h4 style={{ color: '#f8fafc', marginBottom: 6 }}>No Brand Assets Found</h4>
+                <p style={{ fontSize: '0.82rem', maxWidth: 400, margin: '0 auto 16px' }}>
+                  Upload your brand's primary logo, packaging photography, or graphic assets to enable automated visual governance.
+                </p>
+                {isReviewer && (
+                  <button
+                    onClick={() => {
+                      setAssetFile(null);
+                      setAssetTitle('');
+                      setAssetCategory('logo');
+                      setAssetUsageNotes('');
+                      setAssetModalOpen(true);
+                    }}
+                    className="btn btn-primary"
+                    style={{ fontSize: '0.82rem' }}
+                  >
+                    <Upload size={14} style={{ marginRight: 6 }} /> Upload Primary Logo
+                  </button>
+                )}
               </div>
             ) : (
-              filteredAssets.map((asset) => (
-                <div key={asset.id} className="card">
-                  <div className="flex-between" style={{ marginBottom: 10 }}>
-                    <span className="badge badge-neutral">{asset.asset_type.replace(/_/g, ' ')}</span>
-                    <StatusBadge status={asset.status} />
-                  </div>
-                  <div style={{ fontWeight: 600, fontSize: '0.9rem', color: '#fff', marginBottom: 4 }}>
-                    {asset.asset_name}
-                  </div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginBottom: 12 }}>
-                    {asset.mime_type} {asset.width ? `• ${asset.width}x${asset.height}px` : ''}
-                  </div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                    Clearance: <strong>{asset.min_clearance_px || 20}px</strong> | Aspect Ratio: <strong>{asset.aspect_ratio || 'N/A'}</strong>
-                  </div>
+              filteredAssets.map((asset) => {
+                const isLogo = asset.asset_type === 'logo' || asset.asset_name.toLowerCase().includes('logo');
+                const fileUrl = api.getAssetFileUrl(asset.id);
 
-                  {isReviewer && asset.status === 'pending_review' && (
-                    <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
-                      <button
-                        onClick={() => handleReviewAsset(asset.id, 'approved')}
-                        className="btn btn-success"
-                        style={{ flex: 1, padding: '6px 8px', fontSize: '0.75rem' }}
+                return (
+                  <div
+                    key={asset.id}
+                    className="card"
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'space-between',
+                      border: isLogo && asset.status === 'approved' ? '1px solid rgba(234, 179, 8, 0.4)' : undefined,
+                      boxShadow: isLogo && asset.status === 'approved' ? '0 0 15px rgba(234, 179, 8, 0.1)' : undefined
+                    }}
+                  >
+                    <div>
+                      {/* Thumbnail Preview */}
+                      <div
+                        style={{
+                          height: 150,
+                          borderRadius: 6,
+                          background: '#090d16',
+                          border: '1px solid var(--border-subtle)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          overflow: 'hidden',
+                          marginBottom: 12,
+                          position: 'relative'
+                        }}
                       >
-                        Approve
-                      </button>
-                      <button
-                        onClick={() => handleReviewAsset(asset.id, 'rejected')}
-                        className="btn btn-danger"
-                        style={{ flex: 1, padding: '6px 8px', fontSize: '0.75rem' }}
-                      >
-                        Reject
-                      </button>
+                        <img
+                          src={fileUrl}
+                          alt={asset.asset_name}
+                          style={{
+                            maxWidth: '100%',
+                            maxHeight: '100%',
+                            objectFit: 'contain',
+                            padding: 8
+                          }}
+                          onError={(e) => {
+                            (e.target as HTMLElement).style.display = 'none';
+                          }}
+                        />
+                      </div>
+
+                      {/* Badges Bar */}
+                      <div className="flex-between" style={{ marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
+                        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                          {isLogo && (
+                            <span style={{ background: 'rgba(234, 179, 8, 0.2)', color: '#facc15', border: '1px solid rgba(234, 179, 8, 0.4)', padding: '2px 8px', borderRadius: 4, fontSize: '0.7rem', fontWeight: 600 }}>
+                              ⭐ Primary Logo
+                            </span>
+                          )}
+                          <span className="badge badge-neutral" style={{ fontSize: '0.7rem' }}>
+                            {asset.asset_type.replace(/_/g, ' ')}
+                          </span>
+                        </div>
+                        <StatusBadge status={asset.status} />
+                      </div>
+
+                      {/* Asset Title */}
+                      <div style={{ fontWeight: 600, fontSize: '0.92rem', color: '#fff', marginBottom: 6 }}>
+                        {asset.asset_name}
+                      </div>
+
+                      {/* Specs */}
+                      <div style={{ fontSize: '0.74rem', color: 'var(--text-dim)', marginBottom: 8, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        <div>
+                          MIME: {asset.mime_type} {asset.width ? `• ${asset.width}x${asset.height}px` : ''}
+                        </div>
+                        <div>
+                          Clearance: <strong>{asset.min_clearance_px || 20}px</strong> | Aspect Ratio: <strong>{asset.aspect_ratio || 'N/A'}</strong>
+                        </div>
+                        <div>
+                          Uploaded: {new Date(asset.created_at).toLocaleDateString()}
+                        </div>
+                      </div>
+
+                      {/* Usage Instructions / Notes */}
+                      {asset.usage_notes && (
+                        <div style={{ background: 'rgba(255, 255, 255, 0.04)', padding: '8px 10px', borderRadius: 6, border: '1px solid rgba(255, 255, 255, 0.08)', marginBottom: 12 }}>
+                          <div style={{ fontSize: '0.7rem', fontWeight: 600, color: '#93c5fd', marginBottom: 2 }}>
+                            Usage Guidelines:
+                          </div>
+                          <div style={{ fontSize: '0.75rem', color: '#e2e8f0', lineHeight: 1.4 }}>
+                            {asset.usage_notes}
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-              ))
+
+                    {/* Review and Actions Bar */}
+                    <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.06)', paddingTop: 10, marginTop: 10, display: 'flex', gap: 8, justifyContent: 'space-between', alignItems: 'center' }}>
+                      {isReviewer && asset.status === 'pending_review' ? (
+                        <div style={{ display: 'flex', gap: 6, flex: 1 }}>
+                          <button
+                            onClick={() => handleReviewAsset(asset.id, 'approved')}
+                            className="btn btn-success"
+                            style={{ flex: 1, padding: '5px 8px', fontSize: '0.75rem' }}
+                          >
+                            Approve
+                          </button>
+                          <button
+                            onClick={() => handleReviewAsset(asset.id, 'rejected')}
+                            className="btn btn-danger"
+                            style={{ flex: 1, padding: '5px 8px', fontSize: '0.75rem' }}
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>
+                          Status: {asset.status}
+                        </div>
+                      )}
+
+                      {isReviewer && (
+                        <button
+                          onClick={() => handleDeleteAsset(asset.id)}
+                          className="btn btn-secondary"
+                          style={{ padding: '5px 8px', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.3)' }}
+                          title="Delete asset"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
             )}
           </div>
         </div>
       )}
 
-      {/* Tab 4: Uploaded Sources */}
+      {/* ===================================================================== */}
+      {/* PRIMARY TAB 3: UPLOADED SOURCES */}
+      {/* ===================================================================== */}
       {activeTab === 'sources' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div className="flex-between" style={{ alignItems: 'center', marginBottom: 4 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+          {/* Header & Upload Document Action */}
+          <div className="flex-between" style={{ alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
             <div>
-              <h3 style={{ margin: 0, fontSize: '1.05rem', color: '#fff' }}>Reference Documents & Uploaded Sources</h3>
-              <p style={{ margin: '4px 0 0 0', fontSize: '0.78rem', color: 'var(--text-dim)' }}>
-                Optional PDF brand guideline manuals, product specifications, and reference materials. Structured forms remain authoritative.
+              <h3 style={{ margin: 0, fontSize: '1.15rem', color: '#fff' }}>Uploaded Source Documents & Excel Imports</h3>
+              <p style={{ margin: '4px 0 0 0', fontSize: '0.82rem', color: 'var(--text-dim)' }}>
+                Audit trail of original files uploaded by your organisation: Brand Guidelines PDFs, Excel Catalogues, Claims Registers, and Supporting Evidence.
               </p>
             </div>
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button
-                onClick={handleViewSamplePdf}
-                className="btn btn-secondary"
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.82rem' }}
-                title="View sample brand guidelines reference PDF"
-              >
-                <Download size={14} /> View Sample Reference (PDF)
-              </button>
+            <div style={{ display: 'flex', gap: 8 }}>
               {isReviewer && (
                 <button
                   onClick={() => {
@@ -976,723 +1260,578 @@ export const KnowledgeLibrary: React.FC = () => {
                   <Upload size={14} /> Upload Reference Document
                 </button>
               )}
+              <button
+                onClick={() => setExcelModalOpen(true)}
+                className="btn btn-secondary"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.82rem' }}
+              >
+                <FileSpreadsheet size={14} color="#34d399" /> Import Excel Catalogue
+              </button>
             </div>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {sources.length === 0 ? (
-              <div className="card" style={{ textAlign: 'center', padding: 40, color: 'var(--text-dim)' }}>
-                No reference documents uploaded yet. Use the "Upload Reference Document" button above to add PDF guidelines.
-              </div>
-            ) : (
-              sources.map((src) => (
-                <div key={src.id} className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <FileText size={18} color="#818cf8" />
-                      <span style={{ fontWeight: 700, fontSize: '1rem', color: '#fff' }}>{src.title}</span>
-                      <StatusBadge status={src.status} />
-                      <span style={{ background: 'rgba(255,255,255,0.06)', color: '#cbd5e1', padding: '2px 6px', borderRadius: 4, fontSize: '0.72rem' }}>
-                        v{src.version}
-                      </span>
-                    </div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: 4 }}>
-                      Filename: <span style={{ color: '#fff', fontWeight: 600 }}>{src.filename}</span> | Size: {(src.file_size_bytes / 1024).toFixed(1)} KB | Uploaded: {new Date(src.created_at).toLocaleDateString()}
-                    </div>
-                    {src.extracted_summary && (
-                      <div style={{ marginTop: 8, fontSize: '0.8rem', color: '#a5b4fc', lineHeight: 1.4 }}>
-                        {src.extracted_summary}
-                      </div>
-                    )}
-                  </div>
-
-                  <div style={{ textAlign: 'right', marginLeft: 20 }}>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 8 }}>
-                      <div>Rules Extracted: <strong>{src.rules_count || 0}</strong></div>
-                      <div>Facts Extracted: <strong>{src.facts_count || 0}</strong></div>
-                    </div>
-
-                    <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-                      {src.filename.toLowerCase().endsWith('.pdf') && (
-                        <button
-                          onClick={() => handleViewSourceText(src.id, src.title)}
-                          className="btn btn-secondary"
-                          style={{ fontSize: '0.75rem', padding: '6px 12px', display: 'inline-flex', alignItems: 'center', gap: 6 }}
-                          title="View extracted document text per page"
-                        >
-                          <FileText size={13} />
-                          View Document Text
-                        </button>
-                      )}
-
-                      {isReviewer && src.filename.toLowerCase().endsWith('.pdf') && (
-                        <button
-                          onClick={() => handleReprocessSource(src.id, src.title)}
-                          disabled={reprocessingId === src.id}
-                          className="btn btn-secondary"
-                          style={{ fontSize: '0.75rem', padding: '6px 12px', display: 'inline-flex', alignItems: 'center', gap: 6 }}
-                          title="Safely re-run Gemini extraction on this document (preserves reviewed knowledge)"
-                        >
-                          <RefreshCw size={13} className={reprocessingId === src.id ? 'spin' : ''} />
-                          {reprocessingId === src.id ? 'Reprocessing...' : 'Reprocess with Gemini'}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-      )}
-
-      {activeTab === 'rescore' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-          {/* Simulation Header Banner */}
-          <div className="card" style={{
-            background: 'linear-gradient(135deg, rgba(30, 27, 75, 0.7) 0%, rgba(15, 23, 42, 0.9) 100%)',
-            border: '1px solid rgba(99, 102, 241, 0.35)',
-            position: 'relative',
-            overflow: 'hidden'
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16 }}>
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                  <span style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    padding: '4px 10px',
-                    borderRadius: 999,
-                    fontSize: '0.72rem',
-                    fontWeight: 600,
-                    background: 'rgba(99, 102, 241, 0.2)',
-                    color: '#a5b4fc',
-                    border: '1px solid rgba(99, 102, 241, 0.4)'
-                  }}>
-                    <ShieldCheck size={13} /> Non-Destructive Impact Simulation
-                  </span>
-                  <span style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 5,
-                    padding: '4px 10px',
-                    borderRadius: 999,
-                    fontSize: '0.72rem',
-                    fontWeight: 600,
-                    background: 'rgba(16, 185, 129, 0.15)',
-                    color: '#34d399',
-                    border: '1px solid rgba(16, 185, 129, 0.3)'
-                  }}>
-                    <CheckCircle size={13} /> 100% Immutable Historical Manifests
-                  </span>
-                </div>
-                <h2 className="title-md" style={{ color: '#f8fafc', fontSize: '1.25rem', marginBottom: 6 }}>
-                  Historical Knowledge Policy Rescoring Hub
-                </h2>
-                <p style={{ color: '#94a3b8', fontSize: '0.85rem', maxWidth: 700, margin: 0, lineHeight: 1.5 }}>
-                  Evaluate and measure the direct impact of activating new brand guidelines, product catalogue variants, or claim updates across your entire historical ad catalog. Original governance runs and baseline audit trails remain permanently untouched.
-                </p>
-              </div>
-
-              {isReviewer && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <select
-                    value={selectedKbVersionId}
-                    onChange={(e) => setSelectedKbVersionId(e.target.value)}
-                    className="input"
-                    style={{ minWidth: 200, fontSize: '0.82rem', padding: '8px 12px' }}
-                  >
-                    <option value="">Active Version (Default)</option>
-                    {kbVersions.map((v: any) => (
-                      <option key={v.id} value={v.id}>
-                        Version {v.version_num} ({v.version_tag || 'Standard'}) {v.is_active ? '— Active' : ''}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    onClick={handleTriggerRescore}
-                    disabled={rescoringTriggering}
-                    className="btn btn-primary"
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      padding: '9px 16px',
-                      background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
-                      boxShadow: '0 4px 14px rgba(99, 102, 241, 0.4)'
-                    }}
-                  >
-                    <RefreshCw size={15} className={rescoringTriggering ? 'spin' : ''} />
-                    {rescoringTriggering ? 'Evaluating Catalog...' : 'Simulate Policy Rescore'}
-                  </button>
-                </div>
-              )}
+          {/* Section 1: Excel Bulk Import Sessions */}
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+              <FileSpreadsheet size={16} color="#34d399" />
+              <h4 style={{ margin: 0, fontSize: '0.98rem', color: '#f8fafc' }}>
+                Bulk Excel Catalogues & Registers ({stagedImports.length})
+              </h4>
             </div>
-          </div>
 
-          {/* Past Simulation Batches */}
-          {rescoreJobs.length === 0 ? (
-            <div className="card" style={{ textAlign: 'center', padding: '48px 24px', border: '1px dashed var(--border-subtle)' }}>
-              <RefreshCw size={36} color="#6366f1" style={{ margin: '0 auto 16px', opacity: 0.6 }} />
-              <h3 style={{ fontSize: '1.05rem', color: '#f8fafc', marginBottom: 8 }}>No Rescoring Simulations Yet</h3>
-              <p style={{ fontSize: '0.85rem', color: '#94a3b8', maxWidth: 480, margin: '0 auto 20px' }}>
-                Trigger a simulation above to evaluate your historical content assets against the newly activated brand knowledge manifest.
-              </p>
-              {isReviewer && (
-                <button
-                  onClick={handleTriggerRescore}
-                  disabled={rescoringTriggering}
-                  className="btn btn-secondary"
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}
-                >
-                  <RefreshCw size={14} /> Run First Simulation
-                </button>
-              )}
-            </div>
-          ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: selectedRescoreJob ? '340px 1fr' : '1fr', gap: 20 }}>
-              {/* Jobs List */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  Simulation Runs ({rescoreJobs.length})
-                </div>
-                {rescoreJobs.map((job: any) => {
-                  const isSelected = selectedRescoreJob?.id === job.id;
-                  return (
-                    <div
-                      key={job.id}
-                      onClick={() => handleSelectRescoreJob(job.id)}
-                      className="card hover-glow"
-                      style={{
-                        cursor: 'pointer',
-                        padding: 16,
-                        border: isSelected ? '1px solid #6366f1' : '1px solid var(--border-subtle)',
-                        background: isSelected ? 'rgba(99, 102, 241, 0.12)' : 'var(--card-bg)',
-                        transition: 'all 0.2s ease'
-                      }}
-                    >
-                      <div className="flex-between" style={{ marginBottom: 6 }}>
-                        <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#f8fafc' }}>
-                          Target Version {job.version_num || 'Active'}
-                        </span>
-                        <span style={{
-                          fontSize: '0.7rem',
-                          padding: '2px 8px',
-                          borderRadius: 999,
-                          fontWeight: 600,
-                          background: job.status === 'completed' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(234, 179, 8, 0.2)',
-                          color: job.status === 'completed' ? '#34d399' : '#facc15'
-                        }}>
-                          {job.status}
-                        </span>
-                      </div>
-                      <div style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'flex', justifyContent: 'space-between' }}>
-                        <span>Assets evaluated: {job.completed_items || job.total_items}</span>
-                        <span>{new Date(job.created_at).toLocaleDateString()}</span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.82rem' }}>
+                  <thead>
+                    <tr style={{ background: 'rgba(30, 41, 59, 0.7)', borderBottom: '1px solid var(--border-subtle)', color: 'var(--text-dim)' }}>
+                      <th style={{ padding: '10px 14px', fontWeight: 600 }}>File Name</th>
+                      <th style={{ padding: '10px 14px', fontWeight: 600 }}>File Type</th>
+                      <th style={{ padding: '10px 14px', fontWeight: 600 }}>Source Category</th>
+                      <th style={{ padding: '10px 14px', fontWeight: 600 }}>Upload Date</th>
+                      <th style={{ padding: '10px 14px', fontWeight: 600 }}>Uploaded By</th>
+                      <th style={{ padding: '10px 14px', fontWeight: 600 }}>Import Status</th>
+                      <th style={{ padding: '10px 14px', fontWeight: 600, textAlign: 'center' }}>Accepted Rows</th>
+                      <th style={{ padding: '10px 14px', fontWeight: 600, textAlign: 'center' }}>Rejected Rows</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stagedImports.length === 0 ? (
+                      <tr>
+                        <td colSpan={8} style={{ padding: 28, textAlign: 'center', color: 'var(--text-dim)' }}>
+                          No bulk Excel imports uploaded yet. Use "Import Excel" to upload product catalogues or claims registers.
+                        </td>
+                      </tr>
+                    ) : (
+                      stagedImports.map((imp) => {
+                        const categoryLabel =
+                          imp.import_type === 'product_catalogue'
+                            ? 'Product Catalogue'
+                            : imp.has_disclosures
+                            ? 'Claims & Disclosures Register'
+                            : 'Claims Register';
 
-              {/* Selected Job Detail View */}
-              {selectedRescoreJob && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-                  {/* Job Metrics Summary */}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
-                    <div className="card" style={{ padding: 14, textAlign: 'center' }}>
-                      <div style={{ fontSize: '0.72rem', color: '#94a3b8', textTransform: 'uppercase' }}>Assets Evaluated</div>
-                      <div style={{ fontSize: '1.4rem', fontWeight: 700, color: '#f8fafc', marginTop: 4 }}>
-                        {selectedRescoreJob.total_items || 0}
-                      </div>
-                    </div>
-                    <div className="card" style={{ padding: 14, textAlign: 'center' }}>
-                      <div style={{ fontSize: '0.72rem', color: '#94a3b8', textTransform: 'uppercase' }}>Regressed (New Issues)</div>
-                      <div style={{ fontSize: '1.4rem', fontWeight: 700, color: '#f87171', marginTop: 4 }}>
-                        {selectedRescoreJob.items?.filter((it: any) =>
-                          (it.status_before === 'approved' && it.status_after !== 'approved') ||
-                          (it.overall_score_after < it.overall_score_before)
-                        ).length || 0}
-                      </div>
-                    </div>
-                    <div className="card" style={{ padding: 14, textAlign: 'center' }}>
-                      <div style={{ fontSize: '0.72rem', color: '#94a3b8', textTransform: 'uppercase' }}>Improved / Compliant</div>
-                      <div style={{ fontSize: '1.4rem', fontWeight: 700, color: '#34d399', marginTop: 4 }}>
-                        {selectedRescoreJob.items?.filter((it: any) =>
-                          (it.status_before !== 'approved' && it.status_after === 'approved') ||
-                          (it.overall_score_after > it.overall_score_before)
-                        ).length || 0}
-                      </div>
-                    </div>
-                    <div className="card" style={{ padding: 14, textAlign: 'center' }}>
-                      <div style={{ fontSize: '0.72rem', color: '#94a3b8', textTransform: 'uppercase' }}>Unaffected / Neutral</div>
-                      <div style={{ fontSize: '1.4rem', fontWeight: 700, color: '#94a3b8', marginTop: 4 }}>
-                        {selectedRescoreJob.items?.filter((it: any) =>
-                          it.overall_score_after === it.overall_score_before && it.status_before === it.status_after
-                        ).length || 0}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Rescore Batch Items Table */}
-                  <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-                    <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <h3 style={{ fontSize: '0.92rem', fontWeight: 600, color: '#f8fafc', margin: 0 }}>
-                        Catalog Impact Analysis ({selectedRescoreJob.items?.length || 0} assets)
-                      </h3>
-                      <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
-                        Version {selectedRescoreJob.version_num} Simulation
-                      </span>
-                    </div>
-
-                    <div style={{ overflowX: 'auto' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
-                        <thead>
-                          <tr style={{ background: 'rgba(15, 23, 42, 0.6)', borderBottom: '1px solid var(--border-subtle)', textAlign: 'left', color: '#94a3b8' }}>
-                            <th style={{ padding: '10px 16px' }}>Content Item</th>
-                            <th style={{ padding: '10px 16px' }}>Prior Baseline</th>
-                            <th style={{ padding: '10px 16px' }}>Rescored Impact</th>
-                            <th style={{ padding: '10px 16px' }}>Findings Shift</th>
-                            <th style={{ padding: '10px 16px' }}>Transition Verdict</th>
+                        return (
+                          <tr
+                            key={imp.id}
+                            style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}
+                            className="table-row-hover"
+                          >
+                            <td style={{ padding: '10px 14px', fontWeight: 600, color: '#f8fafc' }}>
+                              {imp.file_name}
+                            </td>
+                            <td style={{ padding: '10px 14px' }}>
+                              <span style={{ fontFamily: 'monospace', fontSize: '0.74rem', background: 'rgba(16, 185, 129, 0.1)', color: '#34d399', padding: '2px 6px', borderRadius: 4 }}>
+                                .xlsx spreadsheet
+                              </span>
+                            </td>
+                            <td style={{ padding: '10px 14px', color: 'var(--text-sub)' }}>
+                              {categoryLabel}
+                            </td>
+                            <td style={{ padding: '10px 14px', color: 'var(--text-dim)', fontSize: '0.75rem' }}>
+                              {imp.created_at ? new Date(imp.created_at).toLocaleString() : '—'}
+                            </td>
+                            <td style={{ padding: '10px 14px', color: 'var(--text-sub)' }}>
+                              {imp.created_by_name || 'System / Admin'}
+                            </td>
+                            <td style={{ padding: '10px 14px' }}>
+                              <span className={`badge ${imp.status === 'committed' ? 'badge-success' : imp.status === 'pending_preview' ? 'badge-warning' : 'badge-neutral'}`}>
+                                {imp.status === 'committed' ? 'Committed' : imp.status === 'pending_preview' ? 'Preview Staged' : imp.status}
+                              </span>
+                            </td>
+                            <td style={{ padding: '10px 14px', textAlign: 'center', fontWeight: 600, color: '#4ade80' }}>
+                              {imp.valid_rows}
+                            </td>
+                            <td style={{ padding: '10px 14px', textAlign: 'center', fontWeight: 600, color: imp.error_rows > 0 ? '#f87171' : 'var(--text-dim)' }}>
+                              {imp.error_rows}
+                            </td>
                           </tr>
-                        </thead>
-                        <tbody>
-                          {(!selectedRescoreJob.items || selectedRescoreJob.items.length === 0) ? (
-                            <tr>
-                              <td colSpan={5} style={{ padding: 24, textAlign: 'center', color: '#94a3b8' }}>
-                                No evaluated item details available.
-                              </td>
-                            </tr>
-                          ) : (
-                            selectedRescoreJob.items.map((item: any) => {
-                              const isRegressed =
-                                (item.status_before === 'approved' && item.status_after !== 'approved') ||
-                                (item.overall_score_after < item.overall_score_before);
-                              const isImproved =
-                                (item.status_before !== 'approved' && item.status_after === 'approved') ||
-                                (item.overall_score_after > item.overall_score_before);
-
-                              return (
-                                <tr key={item.id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                                  <td style={{ padding: '12px 16px', fontWeight: 500, color: '#f8fafc' }}>
-                                    <div>{item.content_item_title || 'Historical Asset'}</div>
-                                    <div style={{ fontSize: '0.72rem', color: '#64748b' }}>
-                                      Version {item.content_version_num || 1} • {item.content_item_channel || 'all'}
-                                    </div>
-                                  </td>
-                                  <td style={{ padding: '12px 16px' }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                      <span style={{
-                                        fontSize: '0.72rem',
-                                        padding: '2px 8px',
-                                        borderRadius: 4,
-                                        fontWeight: 600,
-                                        background: item.status_before === 'approved' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)',
-                                        color: item.status_before === 'approved' ? '#34d399' : '#f87171'
-                                      }}>
-                                        {item.status_before || 'unscored'}
-                                      </span>
-                                      <span style={{ color: '#94a3b8', fontSize: '0.8rem' }}>
-                                        {item.overall_score_before != null ? `${item.overall_score_before}%` : '—'}
-                                      </span>
-                                    </div>
-                                  </td>
-                                  <td style={{ padding: '12px 16px' }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                      <span style={{
-                                        fontSize: '0.72rem',
-                                        padding: '2px 8px',
-                                        borderRadius: 4,
-                                        fontWeight: 600,
-                                        background: item.status_after === 'approved' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)',
-                                        color: item.status_after === 'approved' ? '#34d399' : '#f87171'
-                                      }}>
-                                        {item.status_after || 'unscored'}
-                                      </span>
-                                      <span style={{ color: '#f8fafc', fontWeight: 600, fontSize: '0.8rem' }}>
-                                        {item.overall_score_after != null ? `${item.overall_score_after}%` : '—'}
-                                      </span>
-                                    </div>
-                                  </td>
-                                  <td style={{ padding: '12px 16px', color: '#94a3b8', fontSize: '0.76rem' }}>
-                                    {item.critical_findings_diff > 0 && (
-                                      <div style={{ color: '#f87171' }}>+{item.critical_findings_diff} Critical</div>
-                                    )}
-                                    {item.major_findings_diff > 0 && (
-                                      <div style={{ color: '#fb923c' }}>+{item.major_findings_diff} Major</div>
-                                    )}
-                                    {item.critical_findings_diff <= 0 && item.major_findings_diff <= 0 && (
-                                      <span style={{ color: '#64748b' }}>No new violations</span>
-                                    )}
-                                  </td>
-                                  <td style={{ padding: '12px 16px' }}>
-                                    {isRegressed ? (
-                                      <span style={{
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        gap: 4,
-                                        fontSize: '0.72rem',
-                                        fontWeight: 600,
-                                        padding: '3px 8px',
-                                        borderRadius: 999,
-                                        background: 'rgba(239, 68, 68, 0.15)',
-                                        color: '#f87171',
-                                        border: '1px solid rgba(239, 68, 68, 0.3)'
-                                      }}>
-                                        <AlertTriangle size={12} /> Regressed
-                                      </span>
-                                    ) : isImproved ? (
-                                      <span style={{
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        gap: 4,
-                                        fontSize: '0.72rem',
-                                        fontWeight: 600,
-                                        padding: '3px 8px',
-                                        borderRadius: 999,
-                                        background: 'rgba(16, 185, 129, 0.15)',
-                                        color: '#34d399',
-                                        border: '1px solid rgba(16, 185, 129, 0.3)'
-                                      }}>
-                                        <CheckCircle size={12} /> Improved
-                                      </span>
-                                    ) : (
-                                      <span style={{
-                                        fontSize: '0.72rem',
-                                        fontWeight: 500,
-                                        padding: '3px 8px',
-                                        borderRadius: 999,
-                                        background: 'rgba(100, 116, 139, 0.15)',
-                                        color: '#94a3b8'
-                                      }}>
-                                        Unaffected
-                                      </span>
-                                    )}
-                                  </td>
-                                </tr>
-                              );
-                            })
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                </div>
-              )}
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          )}
+          </div>
+
+          {/* Section 2: Reference Guidelines & Documents */}
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+              <FileText size={16} color="#818cf8" />
+              <h4 style={{ margin: 0, fontSize: '0.98rem', color: '#f8fafc' }}>
+                Brand Guidelines & Reference Documentation ({sources.length})
+              </h4>
+            </div>
+
+            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.82rem' }}>
+                  <thead>
+                    <tr style={{ background: 'rgba(30, 41, 59, 0.7)', borderBottom: '1px solid var(--border-subtle)', color: 'var(--text-dim)' }}>
+                      <th style={{ padding: '10px 14px', fontWeight: 600 }}>File Name</th>
+                      <th style={{ padding: '10px 14px', fontWeight: 600 }}>File Type</th>
+                      <th style={{ padding: '10px 14px', fontWeight: 600 }}>Source Category</th>
+                      <th style={{ padding: '10px 14px', fontWeight: 600 }}>Upload Date</th>
+                      <th style={{ padding: '10px 14px', fontWeight: 600 }}>Status</th>
+                      <th style={{ padding: '10px 14px', fontWeight: 600, textAlign: 'center' }}>Extracted Knowledge</th>
+                      <th style={{ padding: '10px 14px', fontWeight: 600, textAlign: 'right' }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sources.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} style={{ padding: 28, textAlign: 'center', color: 'var(--text-dim)' }}>
+                          No reference PDF documents uploaded yet.
+                        </td>
+                      </tr>
+                    ) : (
+                      sources.map((src) => {
+                        const isPdf = src.mime_type.includes('pdf') || src.filename.toLowerCase().endsWith('.pdf');
+                        const downloadUrl = api.getSourceDownloadUrl(src.id);
+
+                        return (
+                          <tr
+                            key={src.id}
+                            style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}
+                            className="table-row-hover"
+                          >
+                            <td style={{ padding: '10px 14px', fontWeight: 600, color: '#f8fafc' }}>
+                              {src.filename}
+                            </td>
+                            <td style={{ padding: '10px 14px' }}>
+                              <span style={{ fontFamily: 'monospace', fontSize: '0.74rem', background: 'rgba(99, 102, 241, 0.1)', color: '#818cf8', padding: '2px 6px', borderRadius: 4 }}>
+                                {isPdf ? 'PDF' : src.mime_type.split('/')[1] || src.mime_type}
+                              </span>
+                            </td>
+                            <td style={{ padding: '10px 14px', color: 'var(--text-sub)' }}>
+                              {src.source_type.replace(/_/g, ' ').toUpperCase()}
+                            </td>
+                            <td style={{ padding: '10px 14px', color: 'var(--text-dim)', fontSize: '0.75rem' }}>
+                              {new Date(src.created_at).toLocaleString()}
+                            </td>
+                            <td style={{ padding: '10px 14px' }}>
+                              <StatusBadge status={src.status} />
+                            </td>
+                            <td style={{ padding: '10px 14px', textAlign: 'center', color: 'var(--text-sub)' }}>
+                              {src.rules_count || 0} rules, {src.facts_count || 0} facts
+                            </td>
+                            <td style={{ padding: '10px 14px', textAlign: 'right' }}>
+                              <div style={{ display: 'inline-flex', gap: 6 }}>
+                                {isPdf && (
+                                  <button
+                                    onClick={() => handleOpenViewText(src.id)}
+                                    className="btn btn-secondary"
+                                    style={{ padding: '4px 8px', fontSize: '0.74rem', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                                    title="Inspect extracted text"
+                                  >
+                                    <Eye size={12} /> View Text
+                                  </button>
+                                )}
+                                <a
+                                  href={downloadUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="btn btn-secondary"
+                                  style={{ padding: '4px 8px', fontSize: '0.74rem', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                                  title="Download original document"
+                                >
+                                  <Download size={12} /> Download
+                                </a>
+                                {isReviewer && isPdf && (
+                                  <button
+                                    onClick={() => handleReprocessSource(src.id)}
+                                    disabled={reprocessingId === src.id}
+                                    className="btn btn-secondary"
+                                    style={{ padding: '4px 8px', fontSize: '0.74rem', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                                    title="Reprocess with Gemini"
+                                  >
+                                    <RefreshCw size={12} className={reprocessingId === src.id ? 'spin' : ''} /> Reprocess
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
-      {/* Edit Rule Correction Modal */}
-      {editRuleModalOpen && editingRule && (
+      {/* ===================================================================== */}
+      {/* DETAIL MODAL: PRODUCT */}
+      {/* ===================================================================== */}
+      {selectedProduct && (
         <div style={{
           position: 'fixed',
           top: 0, left: 0, right: 0, bottom: 0,
           background: 'rgba(0,0,0,0.7)',
           backdropFilter: 'blur(8px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 100
-        }}>
-          <div className="card" style={{ width: 560, background: '#131b2e', border: '1px solid rgba(168, 85, 247, 0.4)' }}>
-            <div className="flex-between" style={{ marginBottom: 16 }}>
-              <div>
-                <h2 className="title-md">Correct Extracted Brand Rule</h2>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>
-                  Rule Code: {editingRule.rule_code || editingRule.id} | Page {editingRule.page_number || 'N/A'}
-                </span>
-              </div>
-              <button onClick={() => setEditRuleModalOpen(false)} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }}>
-                <X size={20} />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveRuleCorrection}>
-              <div className="form-group">
-                <label className="form-label">Rule Title</label>
-                <input
-                  type="text"
-                  value={editRuleForm.title}
-                  onChange={(e) => setEditRuleForm({ ...editRuleForm, title: e.target.value })}
-                  className="input"
-                  required
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Rule Requirement / Statement</label>
-                <textarea
-                  value={editRuleForm.explanation}
-                  onChange={(e) => setEditRuleForm({ ...editRuleForm, explanation: e.target.value })}
-                  className="input"
-                  rows={3}
-                  required
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Pattern / Keywords (comma-separated)</label>
-                <input
-                  type="text"
-                  value={editRuleForm.pattern}
-                  onChange={(e) => setEditRuleForm({ ...editRuleForm, pattern: e.target.value })}
-                  className="input"
-                  required
-                />
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div className="form-group">
-                  <label className="form-label">Severity</label>
-                  <select
-                    value={editRuleForm.severity}
-                    onChange={(e) => setEditRuleForm({ ...editRuleForm, severity: e.target.value })}
-                    className="select"
-                  >
-                    <option value="critical">Critical</option>
-                    <option value="high">High</option>
-                    <option value="warning">Warning / Medium</option>
-                    <option value="low">Low</option>
-                  </select>
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Rule Type</label>
-                  <select
-                    value={editRuleForm.rule_type}
-                    onChange={(e) => setEditRuleForm({ ...editRuleForm, rule_type: e.target.value })}
-                    className="select"
-                  >
-                    <option value="prohibited_word">Prohibited Word / Claim</option>
-                    <option value="required_term">Required Term / Disclosure</option>
-                    <option value="tone_guideline">Tone Guideline</option>
-                    <option value="image_standard">Image / Asset Policy</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Reviewer Correction Notes</label>
-                <input
-                  type="text"
-                  value={editRuleForm.review_notes}
-                  onChange={(e) => setEditRuleForm({ ...editRuleForm, review_notes: e.target.value })}
-                  placeholder="Explain what was corrected and why..."
-                  className="input"
-                />
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 20 }}>
-                <button type="button" onClick={() => setEditRuleModalOpen(false)} className="btn btn-secondary">
-                  Cancel
-                </button>
-                <button type="submit" disabled={savingEdit} className="btn btn-primary">
-                  {savingEdit ? 'Saving...' : 'Save Correction'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Edit Fact Correction Modal */}
-      {editFactModalOpen && editingFact && (
-        <div style={{
-          position: 'fixed',
-          top: 0, left: 0, right: 0, bottom: 0,
-          background: 'rgba(0,0,0,0.7)',
-          backdropFilter: 'blur(8px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 100
-        }}>
-          <div className="card" style={{ width: 560, background: '#131b2e', border: '1px solid rgba(168, 85, 247, 0.4)' }}>
-            <div className="flex-between" style={{ marginBottom: 16 }}>
-              <div>
-                <h2 className="title-md">Correct Extracted Product Fact or Claim</h2>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>
-                  Page {editingFact.page_number || 'N/A'} | Citation: {editingFact.source_citation}
-                </span>
-              </div>
-              <button onClick={() => setEditFactModalOpen(false)} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }}>
-                <X size={20} />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveFactCorrection}>
-              <div className="form-group">
-                <label className="form-label">Product Name / Group</label>
-                <input
-                  type="text"
-                  value={editFactForm.product_name}
-                  onChange={(e) => setEditFactForm({ ...editFactForm, product_name: e.target.value })}
-                  className="input"
-                  required
-                />
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div className="form-group">
-                  <label className="form-label">Fact Attribute / Key</label>
-                  <input
-                    type="text"
-                    value={editFactForm.fact_key}
-                    onChange={(e) => setEditFactForm({ ...editFactForm, fact_key: e.target.value })}
-                    className="input"
-                    required
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Category</label>
-                  <select
-                    value={editFactForm.category}
-                    onChange={(e) => setEditFactForm({ ...editFactForm, category: e.target.value })}
-                    className="select"
-                  >
-                    <option value="nutrition">Nutrition</option>
-                    <option value="ingredient">Ingredient & Allergens</option>
-                    <option value="specification">Specification</option>
-                    <option value="pricing">Pricing</option>
-                    <option value="claim">Claim</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Specification Value / Claim Decision</label>
-                <input
-                  type="text"
-                  value={editFactForm.fact_value}
-                  onChange={(e) => setEditFactForm({ ...editFactForm, fact_value: e.target.value })}
-                  className="input"
-                  required
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Reviewer Correction Notes</label>
-                <input
-                  type="text"
-                  value={editFactForm.review_notes}
-                  onChange={(e) => setEditFactForm({ ...editFactForm, review_notes: e.target.value })}
-                  placeholder="Explain what was corrected..."
-                  className="input"
-                />
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 20 }}>
-                <button type="button" onClick={() => setEditFactModalOpen(false)} className="btn btn-secondary">
-                  Cancel
-                </button>
-                <button type="submit" disabled={savingEdit} className="btn btn-primary">
-                  {savingEdit ? 'Saving...' : 'Save Correction'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Canonical Brand Asset Upload Modal */}
-      {assetModalOpen && (
-        <div style={{
-          position: 'fixed',
-          top: 0, left: 0, right: 0, bottom: 0,
-          background: 'rgba(0,0,0,0.75)',
-          backdropFilter: 'blur(10px)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           zIndex: 100,
           padding: 20
         }}>
-          <div className="card" style={{
-            width: '100%',
-            maxWidth: 540,
-            background: '#131b2e',
-            border: '1px solid rgba(255,255,255,0.18)',
-            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)'
-          }}>
-            <div className="flex-between" style={{ marginBottom: 16, borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: 12 }}>
+          <div className="card" style={{ width: 680, maxHeight: '90vh', overflowY: 'auto', background: '#131b2e', border: '1px solid rgba(59, 130, 246, 0.4)' }}>
+            <div className="flex-between" style={{ marginBottom: 16, borderBottom: '1px solid var(--border-subtle)', paddingBottom: 12 }}>
               <div>
-                <h2 className="title-md" style={{ display: 'flex', alignItems: 'center', gap: 8, margin: 0 }}>
-                  <ImageIcon size={20} color="#818cf8" />
-                  Upload Brand Asset
-                </h2>
-                <p className="text-sub" style={{ fontSize: '0.78rem', marginTop: 4, marginBottom: 0 }}>
-                  Upload official brand logos, product photography, or packaging references.
-                </p>
+                <h2 className="title-md" style={{ color: '#fff' }}>{selectedProduct.product_name}</h2>
+                <div style={{ display: 'flex', gap: 8, marginTop: 4, alignItems: 'center' }}>
+                  <span style={{ fontFamily: 'monospace', color: '#93c5fd', fontSize: '0.8rem', background: 'rgba(255,255,255,0.06)', padding: '2px 6px', borderRadius: 4 }}>
+                    ID: {selectedProduct.product_id}
+                  </span>
+                  <span className="badge badge-success">{selectedProduct.record_status}</span>
+                  <span className="badge badge-neutral">{selectedProduct.offering_type}</span>
+                </div>
               </div>
-              <button
-                onClick={() => setAssetModalOpen(false)}
-                style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: 4 }}
-              >
+              <button onClick={() => setSelectedProduct(null)} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }}>
+                <X size={20} />
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14, fontSize: '0.85rem' }}>
+              <div>
+                <strong style={{ color: '#93c5fd' }}>Category & Market:</strong>
+                <div style={{ color: '#e2e8f0', marginTop: 2 }}>{selectedProduct.product_category} — Market: {selectedProduct.applicable_market}</div>
+              </div>
+
+              {selectedProduct.sku && (
+                <div>
+                  <strong style={{ color: '#93c5fd' }}>SKU / Variant:</strong>
+                  <div style={{ color: '#e2e8f0', marginTop: 2 }}>{selectedProduct.sku} {selectedProduct.variant_name ? `(${selectedProduct.variant_name})` : ''}</div>
+                </div>
+              )}
+
+              {selectedProduct.pack_size && (
+                <div>
+                  <strong style={{ color: '#93c5fd' }}>Pack Size / Unit:</strong>
+                  <div style={{ color: '#e2e8f0', marginTop: 2 }}>{selectedProduct.pack_size} {selectedProduct.pack_unit || ''}</div>
+                </div>
+              )}
+
+              <div>
+                <strong style={{ color: '#93c5fd' }}>Product Description:</strong>
+                <div style={{ color: '#cbd5e1', marginTop: 2, lineHeight: 1.5 }}>{selectedProduct.product_description}</div>
+              </div>
+
+              {selectedProduct.ingredients_components && (
+                <div>
+                  <strong style={{ color: '#93c5fd' }}>Ingredients / Formulation Components:</strong>
+                  <div style={{ color: '#cbd5e1', marginTop: 2, lineHeight: 1.5, background: 'rgba(0,0,0,0.2)', padding: 10, borderRadius: 6 }}>
+                    {selectedProduct.ingredients_components}
+                  </div>
+                </div>
+              )}
+
+              {selectedProduct.key_features && (
+                <div>
+                  <strong style={{ color: '#93c5fd' }}>Key Features:</strong>
+                  <div style={{ color: '#cbd5e1', marginTop: 2, lineHeight: 1.5, background: 'rgba(0,0,0,0.2)', padding: 10, borderRadius: 6 }}>
+                    {selectedProduct.key_features}
+                  </div>
+                </div>
+              )}
+
+              {selectedProduct.specifications && (
+                <div>
+                  <strong style={{ color: '#93c5fd' }}>Technical Specifications:</strong>
+                  <div style={{ color: '#cbd5e1', marginTop: 2, lineHeight: 1.5, background: 'rgba(0,0,0,0.2)', padding: 10, borderRadius: 6 }}>
+                    {selectedProduct.specifications}
+                  </div>
+                </div>
+              )}
+
+              {selectedProduct.known_limitations && (
+                <div>
+                  <strong style={{ color: '#f87171' }}>Known Limitations & Warnings:</strong>
+                  <div style={{ color: '#fca5a5', marginTop: 2, lineHeight: 1.5, background: 'rgba(239, 68, 68, 0.1)', padding: 10, borderRadius: 6, border: '1px solid rgba(239, 68, 68, 0.2)' }}>
+                    {selectedProduct.known_limitations}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div style={{ marginTop: 20, textAlign: 'right' }}>
+              <button onClick={() => setSelectedProduct(null)} className="btn btn-secondary">
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* DETAIL MODAL: CLAIM */}
+      {/* ===================================================================== */}
+      {selectedClaim && (
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.7)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 100,
+          padding: 20
+        }}>
+          <div className="card" style={{ width: 680, maxHeight: '90vh', overflowY: 'auto', background: '#131b2e', border: '1px solid rgba(99, 102, 241, 0.4)' }}>
+            <div className="flex-between" style={{ marginBottom: 16, borderBottom: '1px solid var(--border-subtle)', paddingBottom: 12 }}>
+              <div>
+                <h2 className="title-md" style={{ color: '#fff' }}>Claim Details</h2>
+                <div style={{ display: 'flex', gap: 8, marginTop: 4, alignItems: 'center' }}>
+                  <span style={{ fontFamily: 'monospace', color: '#a5b4fc', fontSize: '0.8rem', background: 'rgba(99, 102, 241, 0.1)', padding: '2px 6px', borderRadius: 4 }}>
+                    ID: {selectedClaim.claim_id}
+                  </span>
+                  <span className={`badge ${selectedClaim.claim_status === 'Approved' ? 'badge-success' : selectedClaim.claim_status === 'Restricted' ? 'badge-warning' : 'badge-danger'}`}>
+                    {selectedClaim.claim_status}
+                  </span>
+                  <span className="badge badge-neutral">{selectedClaim.claim_type}</span>
+                </div>
+              </div>
+              <button onClick={() => setSelectedClaim(null)} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }}>
+                <X size={20} />
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14, fontSize: '0.85rem' }}>
+              <div>
+                <strong style={{ color: '#a5b4fc' }}>Authoritative Claim Text:</strong>
+                <div style={{ color: '#f8fafc', fontSize: '0.95rem', fontWeight: 500, marginTop: 4, background: 'rgba(0,0,0,0.2)', padding: 12, borderRadius: 6, lineHeight: 1.5 }}>
+                  "{selectedClaim.claim_text}"
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <strong style={{ color: '#a5b4fc' }}>Associated Product:</strong>
+                  <div style={{ color: '#e2e8f0', marginTop: 2, fontFamily: 'monospace' }}>{selectedClaim.applicable_product_id}</div>
+                </div>
+                <div>
+                  <strong style={{ color: '#a5b4fc' }}>Applicable Market:</strong>
+                  <div style={{ color: '#e2e8f0', marginTop: 2 }}>{selectedClaim.applicable_market}</div>
+                </div>
+              </div>
+
+              <div>
+                <strong style={{ color: '#a5b4fc' }}>Effective Validity Period:</strong>
+                <div style={{ color: '#e2e8f0', marginTop: 2 }}>
+                  From: {selectedClaim.effective_from} → Until: {selectedClaim.effective_until || 'Indefinite'}
+                </div>
+              </div>
+
+              {selectedClaim.approved_variations && (
+                <div>
+                  <strong style={{ color: '#4ade80' }}>Approved Variations:</strong>
+                  <div style={{ color: '#bbf7d0', marginTop: 2, lineHeight: 1.5, background: 'rgba(34, 197, 94, 0.08)', padding: 10, borderRadius: 6, border: '1px solid rgba(34, 197, 94, 0.2)' }}>
+                    {selectedClaim.approved_variations}
+                  </div>
+                </div>
+              )}
+
+              {selectedClaim.restricted_conditions && (
+                <div>
+                  <strong style={{ color: '#fbbf24' }}>Restricted Conditions & Provisos:</strong>
+                  <div style={{ color: '#fde68a', marginTop: 2, lineHeight: 1.5, background: 'rgba(245, 158, 11, 0.08)', padding: 10, borderRadius: 6, border: '1px solid rgba(245, 158, 11, 0.2)' }}>
+                    {selectedClaim.restricted_conditions}
+                  </div>
+                </div>
+              )}
+
+              {selectedClaim.prohibited_variations && (
+                <div>
+                  <strong style={{ color: '#f87171' }}>Prohibited Phrasings / Variations:</strong>
+                  <div style={{ color: '#fca5a5', marginTop: 2, lineHeight: 1.5, background: 'rgba(239, 68, 68, 0.08)', padding: 10, borderRadius: 6, border: '1px solid rgba(239, 68, 68, 0.2)' }}>
+                    {selectedClaim.prohibited_variations}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div style={{ marginTop: 20, textAlign: 'right' }}>
+              <button onClick={() => setSelectedClaim(null)} className="btn btn-secondary">
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* DETAIL MODAL: REQUIRED DISCLOSURE */}
+      {/* ===================================================================== */}
+      {selectedDisclosure && (
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.7)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 100,
+          padding: 20
+        }}>
+          <div className="card" style={{ width: 680, maxHeight: '90vh', overflowY: 'auto', background: '#131b2e', border: '1px solid rgba(245, 158, 11, 0.4)' }}>
+            <div className="flex-between" style={{ marginBottom: 16, borderBottom: '1px solid var(--border-subtle)', paddingBottom: 12 }}>
+              <div>
+                <h2 className="title-md" style={{ color: '#fff' }}>Required Disclosure Details</h2>
+                <div style={{ display: 'flex', gap: 8, marginTop: 4, alignItems: 'center' }}>
+                  <span style={{ fontFamily: 'monospace', color: '#f59e0b', fontSize: '0.8rem', background: 'rgba(245, 158, 11, 0.1)', padding: '2px 6px', borderRadius: 4 }}>
+                    ID: {selectedDisclosure.disclosure_id}
+                  </span>
+                  <span className="badge badge-warning">Mandatory Disclosure</span>
+                </div>
+              </div>
+              <button onClick={() => setSelectedDisclosure(null)} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }}>
+                <X size={20} />
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14, fontSize: '0.85rem' }}>
+              <div>
+                <strong style={{ color: '#fbbf24' }}>Mandatory Disclosure Text:</strong>
+                <div style={{ color: '#fef3c7', fontSize: '0.95rem', fontWeight: 500, marginTop: 4, background: 'rgba(245, 158, 11, 0.08)', padding: 12, borderRadius: 6, border: '1px solid rgba(245, 158, 11, 0.2)', lineHeight: 1.5 }}>
+                  "{selectedDisclosure.disclosure_text}"
+                </div>
+              </div>
+
+              <div>
+                <strong style={{ color: '#fbbf24' }}>Trigger Condition (Applies When):</strong>
+                <div style={{ color: '#e2e8f0', marginTop: 2, background: 'rgba(0,0,0,0.2)', padding: 10, borderRadius: 6 }}>
+                  {selectedDisclosure.applies_when}
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <strong style={{ color: '#fbbf24' }}>Associated Product:</strong>
+                  <div style={{ color: '#e2e8f0', marginTop: 2, fontFamily: 'monospace' }}>{selectedDisclosure.applicable_product_id}</div>
+                </div>
+                <div>
+                  <strong style={{ color: '#fbbf24' }}>Applicable Market:</strong>
+                  <div style={{ color: '#e2e8f0', marginTop: 2 }}>{selectedDisclosure.applicable_market}</div>
+                </div>
+              </div>
+
+              <div>
+                <strong style={{ color: '#fbbf24' }}>Effective Validity Period:</strong>
+                <div style={{ color: '#e2e8f0', marginTop: 2 }}>
+                  From: {selectedDisclosure.effective_from} → Until: {selectedDisclosure.effective_until || 'Indefinite'}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 20, textAlign: 'right' }}>
+              <button onClick={() => setSelectedDisclosure(null)} className="btn btn-secondary">
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* MODAL: UPLOAD BRAND ASSET (Primary Logo, Product Images, Graphics) */}
+      {/* ===================================================================== */}
+      {assetModalOpen && (
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.7)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 100,
+          padding: 20
+        }}>
+          <div className="card" style={{ width: 560, background: '#131b2e', border: '1px solid rgba(99, 102, 241, 0.4)' }}>
+            <div className="flex-between" style={{ marginBottom: 16 }}>
+              <div>
+                <h2 className="title-md">Upload Brand Asset</h2>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>
+                  Upload official brand logos, product photography, or approved graphics.
+                </span>
+              </div>
+              <button onClick={() => setAssetModalOpen(false)} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }}>
                 <X size={20} />
               </button>
             </div>
 
             <form onSubmit={handleUploadAsset}>
+              {/* Category selector */}
               <div className="form-group" style={{ marginBottom: 14 }}>
-                <label className="form-label">Asset Name / Title *</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Primary Brand Logo"
-                  value={assetTitle}
-                  onChange={(e) => setAssetTitle(e.target.value)}
+                <label className="form-label">Asset Category</label>
+                <select
+                  value={assetCategory}
+                  onChange={(e: any) => setAssetCategory(e.target.value)}
                   className="input"
                   required
-                />
-              </div>
-
-              <div className="form-group" style={{ marginBottom: 14 }}>
-                <label className="form-label">Brand</label>
-                <select
-                  value={selectedBrandId}
-                  onChange={(e) => setSelectedBrandId(e.target.value)}
-                  className="select"
-                  disabled={uploading}
                 >
-                  {brands.map(b => (
-                    <option key={b.id} value={b.id}>{b.name}</option>
-                  ))}
+                  <option value="logo">⭐ Primary Logo (Mandatory for Visual Governance)</option>
+                  <option value="product_image">Product Image (Packshot / Variant)</option>
+                  <option value="brand_graphic">Brand Graphic (Badge, Icon, Creative)</option>
+                  <option value="approved_asset">Other Approved Asset</option>
                 </select>
               </div>
 
-              <div className="form-group" style={{ marginBottom: 18 }}>
-                <label className="form-label">Image File (SVG, PNG, JPG, WEBP) *</label>
+              {/* Asset Name */}
+              <div className="form-group" style={{ marginBottom: 14 }}>
+                <label className="form-label">Asset Name</label>
                 <input
-                  type="file"
-                  accept=".svg,image/png,image/jpeg,image/webp"
-                  onChange={(e) => setAssetFile(e.target.files?.[0] || null)}
+                  type="text"
+                  placeholder="e.g. Primary Brand Logo - Dark Horizontal"
+                  value={assetTitle}
+                  onChange={(e) => setAssetTitle(e.target.value)}
                   className="input"
-                  disabled={uploading}
-                  required
                 />
-                <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginTop: 4, display: 'block' }}>
-                  Transparent PNG or SVG preferred for official brand logos.
-                </span>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              {/* File input */}
+              <div className="form-group" style={{ marginBottom: 14 }}>
+                <label className="form-label">File (PNG, SVG, JPG, WEBP)</label>
+                <input
+                  type="file"
+                  accept="image/png,image/svg+xml,image/jpeg,image/webp"
+                  onChange={(e) => setAssetFile(e.target.files?.[0] || null)}
+                  className="input"
+                  required
+                />
+              </div>
+
+              {/* Usage Instructions / Notes */}
+              <div className="form-group" style={{ marginBottom: 16 }}>
+                <label className="form-label">Usage Instructions / Placement Rules (Optional)</label>
+                <textarea
+                  placeholder="e.g. Minimum clear space 20px. Must not be placed on clashing backgrounds. Use horizontal orientation on desktop."
+                  value={assetUsageNotes}
+                  onChange={(e) => setAssetUsageNotes(e.target.value)}
+                  className="input"
+                  rows={3}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
                 <button
                   type="button"
                   onClick={() => setAssetModalOpen(false)}
                   className="btn btn-secondary"
-                  disabled={uploading}
+                  disabled={uploadingAsset}
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  disabled={uploading || !assetFile}
                   className="btn btn-primary"
+                  disabled={uploadingAsset || !assetFile}
                 >
-                  {uploading ? 'Uploading...' : 'Upload Asset'}
+                  {uploadingAsset ? 'Uploading...' : 'Upload Asset'}
                 </button>
               </div>
             </form>
@@ -1700,64 +1839,41 @@ export const KnowledgeLibrary: React.FC = () => {
         </div>
       )}
 
-      {/* Canonical Reference Document Upload Modal */}
+      {/* ===================================================================== */}
+      {/* MODAL: UPLOAD REFERENCE DOCUMENT (PDF Brand Guidelines, Supporting Docs) */}
+      {/* ===================================================================== */}
       {sourceModalOpen && (
         <div style={{
           position: 'fixed',
           top: 0, left: 0, right: 0, bottom: 0,
-          background: 'rgba(0,0,0,0.75)',
-          backdropFilter: 'blur(10px)',
+          background: 'rgba(0,0,0,0.7)',
+          backdropFilter: 'blur(8px)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           zIndex: 100,
           padding: 20
         }}>
-          <div className="card" style={{
-            width: '100%',
-            maxWidth: 540,
-            background: '#131b2e',
-            border: '1px solid rgba(255,255,255,0.18)',
-            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)'
-          }}>
-            <div className="flex-between" style={{ marginBottom: 16, borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: 12 }}>
+          <div className="card" style={{ width: 540, background: '#131b2e', border: '1px solid rgba(99, 102, 241, 0.4)' }}>
+            <div className="flex-between" style={{ marginBottom: 16 }}>
               <div>
-                <h2 className="title-md" style={{ display: 'flex', alignItems: 'center', gap: 8, margin: 0 }}>
-                  <FileText size={20} color="#818cf8" />
-                  Upload Reference Document
-                </h2>
-                <p className="text-sub" style={{ fontSize: '0.78rem', marginTop: 4, marginBottom: 0 }}>
-                  Upload optional brand guidelines manuals or supporting reference documents in PDF format.
-                </p>
+                <h2 className="title-md">Upload Reference Document</h2>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>
+                  Brand guidelines PDFs or supporting regulatory documents.
+                </span>
               </div>
-              <button
-                onClick={() => setSourceModalOpen(false)}
-                style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: 4 }}
-              >
+              <button onClick={() => setSourceModalOpen(false)} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }}>
                 <X size={20} />
               </button>
             </div>
 
             <form onSubmit={handleUploadSource}>
               <div className="form-group" style={{ marginBottom: 14 }}>
-                <label className="form-label">Document Title *</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Brand Guidelines Reference Manual"
-                  value={sourceTitle}
-                  onChange={(e) => setSourceTitle(e.target.value)}
-                  className="input"
-                  required
-                />
-              </div>
-
-              <div className="form-group" style={{ marginBottom: 14 }}>
                 <label className="form-label">Document Category</label>
                 <select
                   value={sourceType}
                   onChange={(e) => setSourceType(e.target.value)}
-                  className="select"
-                  disabled={uploading}
+                  className="input"
                 >
                   <option value="pdf_brand_guidelines">PDF Brand Guidelines</option>
                   <option value="pdf_product_knowledge">PDF Product Knowledge & Specs</option>
@@ -1766,49 +1882,42 @@ export const KnowledgeLibrary: React.FC = () => {
               </div>
 
               <div className="form-group" style={{ marginBottom: 14 }}>
-                <label className="form-label">Brand</label>
-                <select
-                  value={selectedBrandId}
-                  onChange={(e) => setSelectedBrandId(e.target.value)}
-                  className="select"
-                  disabled={uploading}
-                >
-                  {brands.map(b => (
-                    <option key={b.id} value={b.id}>{b.name}</option>
-                  ))}
-                </select>
+                <label className="form-label">Document Title</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Master Brand Style & Compliance Guide 2026"
+                  value={sourceTitle}
+                  onChange={(e) => setSourceTitle(e.target.value)}
+                  className="input"
+                />
               </div>
 
-              <div className="form-group" style={{ marginBottom: 18 }}>
-                <label className="form-label">PDF Document (.pdf) *</label>
+              <div className="form-group" style={{ marginBottom: 16 }}>
+                <label className="form-label">File (PDF)</label>
                 <input
                   type="file"
-                  accept=".pdf,application/pdf"
+                  accept="application/pdf"
                   onChange={(e) => setSourceFile(e.target.files?.[0] || null)}
                   className="input"
-                  disabled={uploading}
                   required
                 />
-                <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginTop: 4, display: 'block' }}>
-                  Extracted rules and facts will be placed into Pending Review.
-                </span>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
                 <button
                   type="button"
                   onClick={() => setSourceModalOpen(false)}
                   className="btn btn-secondary"
-                  disabled={uploading}
+                  disabled={uploadingSource}
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  disabled={uploading || !sourceFile}
                   className="btn btn-primary"
+                  disabled={uploadingSource || !sourceFile}
                 >
-                  {uploading ? 'Processing Extraction...' : 'Upload & Extract Candidates'}
+                  {uploadingSource ? 'Uploading...' : 'Upload Document'}
                 </button>
               </div>
             </form>
@@ -1816,170 +1925,9 @@ export const KnowledgeLibrary: React.FC = () => {
         </div>
       )}
 
-      {/* Manual Rule Creation Modal */}
-      {addRuleModalOpen && (
-        <div style={{
-          position: 'fixed',
-          top: 0, left: 0, right: 0, bottom: 0,
-          background: 'rgba(0,0,0,0.75)',
-          backdropFilter: 'blur(8px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 110,
-          padding: 20
-        }}>
-          <div className="card" style={{ width: '100%', maxWidth: 580, maxHeight: '90vh', overflowY: 'auto', background: '#131b2e', border: '1px solid rgba(99, 102, 241, 0.4)' }}>
-            <div className="flex-between" style={{ marginBottom: 16 }}>
-              <div>
-                <h2 className="title-md">Create Brand Governance Rule</h2>
-                <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: 2 }}>
-                  Rules start in <strong style={{ color: '#fbbf24' }}>Pending Review</strong> and must be verified by a human reviewer.
-                </div>
-              </div>
-              <button
-                onClick={() => setAddRuleModalOpen(false)}
-                style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: 4 }}
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveNewRule}>
-              <div className="form-group" style={{ marginBottom: 12 }}>
-                <label className="form-label">Rule Title *</label>
-                <input
-                  type="text"
-                  value={newRuleForm.title}
-                  onChange={(e) => setNewRuleForm({ ...newRuleForm, title: e.target.value })}
-                  placeholder="e.g. Unsupported Performance Claims"
-                  className="input"
-                  required
-                />
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
-                <div className="form-group">
-                  <label className="form-label">Rule Type *</label>
-                  <select
-                    value={newRuleForm.rule_type}
-                    onChange={(e) => setNewRuleForm({ ...newRuleForm, rule_type: e.target.value })}
-                    className="select"
-                  >
-                    <option value="prohibited_word">Prohibited Words / Phrases</option>
-                    <option value="required_term">Required Terms / Disclosures</option>
-                    <option value="claim_policy">Claim Substantiation Policy</option>
-                    <option value="tone_guideline">Tone & Voice Guideline</option>
-                    <option value="image_standard">Visual & Asset Standard</option>
-                  </select>
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Enforcement Severity *</label>
-                  <select
-                    value={newRuleForm.severity}
-                    onChange={(e) => setNewRuleForm({ ...newRuleForm, severity: e.target.value })}
-                    className="select"
-                  >
-                    <option value="critical">Critical (Hard Block)</option>
-                    <option value="high">High (Strict Flag)</option>
-                    <option value="warning">Warning / Medium</option>
-                    <option value="low">Low (Advisory)</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="form-group" style={{ marginBottom: 12 }}>
-                <label className="form-label">Trigger Pattern or Forbidden Text *</label>
-                <input
-                  type="text"
-                  value={newRuleForm.pattern}
-                  onChange={(e) => setNewRuleForm({ ...newRuleForm, pattern: e.target.value })}
-                  placeholder="e.g. 100% secure, unhackable, zero risk"
-                  className="input"
-                  required
-                />
-                <div style={{ fontSize: '0.7rem', color: 'var(--text-dim)', marginTop: 2 }}>
-                  Content containing this phrase will trigger a governance violation.
-                </div>
-              </div>
-
-              <div className="form-group" style={{ marginBottom: 12 }}>
-                <label className="form-label">Requirement & Explanation *</label>
-                <textarea
-                  value={newRuleForm.explanation}
-                  onChange={(e) => setNewRuleForm({ ...newRuleForm, explanation: e.target.value })}
-                  placeholder="Explain why this rule exists and how creators should write compliant content..."
-                  className="input"
-                  rows={3}
-                  required
-                />
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12, marginBottom: 12 }}>
-                <div className="form-group">
-                  <label className="form-label">Link to Source Document</label>
-                  <select
-                    value={newRuleForm.source_id}
-                    onChange={(e) => setNewRuleForm({ ...newRuleForm, source_id: e.target.value })}
-                    className="select"
-                  >
-                    <option value="">None / General Guideline</option>
-                    {sources.map(s => (
-                      <option key={s.id} value={s.id}>
-                        {s.title} ({s.filename})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Page Number</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={newRuleForm.page_number}
-                    onChange={(e) => setNewRuleForm({ ...newRuleForm, page_number: e.target.value })}
-                    placeholder="e.g. 4"
-                    className="input"
-                  />
-                </div>
-              </div>
-
-              <div className="form-group" style={{ marginBottom: 16 }}>
-                <label className="form-label">Supporting Evidence Passage</label>
-                <textarea
-                  value={newRuleForm.evidence_passage}
-                  onChange={(e) => setNewRuleForm({ ...newRuleForm, evidence_passage: e.target.value })}
-                  placeholder="Quotation from the brand guidelines supporting this requirement..."
-                  className="input"
-                  rows={2}
-                />
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-                <button
-                  type="button"
-                  onClick={() => setAddRuleModalOpen(false)}
-                  className="btn btn-secondary"
-                  disabled={savingNewRule}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={savingNewRule}
-                  className="btn btn-primary"
-                >
-                  {savingNewRule ? 'Creating...' : 'Create Rule (Pending Review)'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Document Text Viewing Modal */}
+      {/* ===================================================================== */}
+      {/* MODAL: VIEW EXTRACTED TEXT FROM PDF */}
+      {/* ===================================================================== */}
       {viewTextModalOpen && (
         <div style={{
           position: 'fixed',
@@ -1989,128 +1937,248 @@ export const KnowledgeLibrary: React.FC = () => {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          zIndex: 110,
+          zIndex: 100,
           padding: 20
         }}>
-          <div className="card" style={{ width: '100%', maxWidth: 780, maxHeight: '90vh', display: 'flex', flexDirection: 'column', background: '#131b2e', border: '1px solid rgba(99, 102, 241, 0.4)' }}>
-            <div className="flex-between" style={{ marginBottom: 12 }}>
+          <div className="card" style={{ width: 800, maxHeight: '90vh', display: 'flex', flexDirection: 'column', background: '#131b2e', border: '1px solid rgba(99, 102, 241, 0.4)' }}>
+            <div className="flex-between" style={{ marginBottom: 14, borderBottom: '1px solid var(--border-subtle)', paddingBottom: 10 }}>
               <div>
-                <h2 className="title-md" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <FileText size={18} color="#818cf8" />
-                  {viewTextData ? viewTextData.filename : 'Document Text'}
-                </h2>
-                {viewTextData && (
-                  <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: 2 }}>
-                    {viewTextData.total_pages} page(s) | {viewTextData.total_characters} characters extracted locally
-                  </div>
-                )}
+                <h2 className="title-md">{viewTextData?.title || 'Document Text Viewer'}</h2>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>
+                  {viewTextData?.filename} • {viewTextData?.total_pages || 0} pages • {viewTextData?.total_characters || 0} characters
+                </span>
               </div>
-              <button
-                onClick={() => setViewTextModalOpen(false)}
-                style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: 4 }}
-              >
-                <X size={18} />
+              <button onClick={() => setViewTextModalOpen(false)} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }}>
+                <X size={20} />
               </button>
             </div>
 
             {loadingText ? (
-              <div style={{ padding: 40, textAlign: 'center', color: '#a5b4fc' }}>
+              <div style={{ textAlign: 'center', padding: 48, color: 'var(--text-dim)' }}>
                 <RefreshCw size={24} className="spin" style={{ margin: '0 auto 12px' }} />
-                Extracting document text from storage...
+                Loading document text...
               </div>
             ) : viewTextData ? (
-              <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-                {/* Page Selector Tabs */}
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10, paddingBottom: 8, borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-                  <button
-                    onClick={() => setSelectedTextPage(0)}
-                    className={`tab-btn ${selectedTextPage === 0 ? 'active' : ''}`}
-                    style={{ fontSize: '0.75rem', padding: '4px 10px' }}
-                  >
-                    All Pages ({viewTextData.total_pages})
-                  </button>
-                  {viewTextData.pages.map((p: any) => (
-                    <button
-                      key={p.page_number}
-                      onClick={() => setSelectedTextPage(p.page_number)}
-                      className={`tab-btn ${selectedTextPage === p.page_number ? 'active' : ''}`}
-                      style={{ fontSize: '0.75rem', padding: '4px 10px' }}
-                    >
-                      Page {p.page_number}
-                    </button>
-                  ))}
-                </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, minHeight: 0 }}>
+                {/* Page Selector */}
+                {viewTextData.pages && viewTextData.pages.length > 1 && (
+                  <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 6 }}>
+                    {viewTextData.pages.map((p: any) => (
+                      <button
+                        key={p.page_number}
+                        onClick={() => setSelectedTextPage(p.page_number)}
+                        className={`btn ${selectedTextPage === p.page_number ? 'btn-primary' : 'btn-secondary'}`}
+                        style={{ padding: '4px 10px', fontSize: '0.75rem' }}
+                      >
+                        Page {p.page_number}
+                      </button>
+                    ))}
+                  </div>
+                )}
 
-                {/* Text View Box */}
+                {/* Page Content */}
                 <div style={{
                   flex: 1,
-                  minHeight: 280,
-                  maxHeight: 460,
                   overflowY: 'auto',
-                  background: '#0a0e1a',
-                  border: '1px solid rgba(255,255,255,0.1)',
+                  background: 'rgba(0,0,0,0.3)',
+                  padding: 16,
                   borderRadius: 6,
-                  padding: 14,
-                  fontSize: '0.8rem',
+                  fontFamily: 'monospace',
+                  fontSize: '0.82rem',
                   lineHeight: 1.6,
-                  color: '#e2e8f0',
                   whiteSpace: 'pre-wrap',
-                  fontFamily: 'monospace'
+                  color: '#e2e8f0'
                 }}>
-                  {selectedTextPage === 0
-                    ? viewTextData.full_text || '[No extractable text]'
-                    : (viewTextData.pages.find((p: any) => p.page_number === selectedTextPage)?.text || '[No text on this page]')}
+                  {viewTextData.pages?.find((p: any) => p.page_number === selectedTextPage)?.text || viewTextData.full_text || 'No text extracted.'}
                 </div>
+              </div>
+            ) : null}
 
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 14 }}>
-                  <button
-                    onClick={() => {
-                      setViewTextModalOpen(false);
-                      handleOpenAddRule();
-                    }}
-                    className="btn btn-secondary"
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.8rem' }}
-                  >
-                    <Plus size={14} />
-                    Add Rule from this Document
-                  </button>
-                  <button
-                    onClick={() => setViewTextModalOpen(false)}
-                    className="btn btn-primary"
-                    style={{ fontSize: '0.8rem' }}
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div style={{ padding: 40, textAlign: 'center', color: '#fb7185' }}>
-                Failed to load document text.
-              </div>
-            )}
+            <div style={{ marginTop: 14, textAlign: 'right' }}>
+              <button onClick={() => setViewTextModalOpen(false)} className="btn btn-secondary">
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}
 
-      {/* Round 3 Excel Import Modal */}
-      <ExcelImportModal
-        isOpen={excelModalOpen}
-        onClose={() => setExcelModalOpen(false)}
-        onSuccess={() => {
-          setExcelModalOpen(false);
-          loadData();
-        }}
-      />
+      {/* ===================================================================== */}
+      {/* MODAL: RELOCATED POLICY IMPACT RESCORING HUB */}
+      {/* ===================================================================== */}
+      {rescoreModalOpen && (
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.75)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 100,
+          padding: 20
+        }}>
+          <div className="card" style={{ width: 900, maxHeight: '92vh', overflowY: 'auto', background: '#131b2e', border: '1px solid rgba(167, 139, 250, 0.4)' }}>
+            <div className="flex-between" style={{ marginBottom: 16, borderBottom: '1px solid var(--border-subtle)', paddingBottom: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <RefreshCw size={20} color="#c084fc" />
+                <div>
+                  <h2 className="title-md" style={{ color: '#fff', margin: 0 }}>Policy Impact Rescoring Hub</h2>
+                  <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-dim)' }}>
+                    Non-destructive simulation: Evaluate your historical content assets against newly activated brand knowledge manifests.
+                  </p>
+                </div>
+              </div>
+              <button onClick={() => setRescoreModalOpen(false)} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }}>
+                <X size={20} />
+              </button>
+            </div>
 
-      {/* Round 3 Brand Profile Modal */}
-      <BrandProfileModal
-        isOpen={brandProfileModalOpen}
-        onClose={() => setBrandProfileModalOpen(false)}
-        onSaved={() => {
-          setBrandProfileModalOpen(false);
-          loadData();
-        }}
-      />
+            {/* Simulation Trigger Bar */}
+            <div className="card" style={{ background: 'rgba(30, 27, 75, 0.5)', border: '1px solid rgba(99, 102, 241, 0.3)', marginBottom: 20 }}>
+              <div className="flex-between" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+                <div>
+                  <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#f8fafc' }}>
+                    Simulate Historical Content Catalog
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
+                    Original governance runs and baseline audit trails remain permanently untouched.
+                  </div>
+                </div>
+
+                {isReviewer && (
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <select
+                      value={selectedKbVersionId}
+                      onChange={(e) => setSelectedKbVersionId(e.target.value)}
+                      className="input"
+                      style={{ fontSize: '0.8rem', padding: '6px 10px', minWidth: 200 }}
+                    >
+                      <option value="">Active Version (Default)</option>
+                      {kbVersions.map((v: any) => (
+                        <option key={v.id} value={v.id}>
+                          Version {v.version_num} ({v.version_tag || 'Standard'}) {v.is_active ? '• Active' : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={handleTriggerRescore}
+                      disabled={rescoringTriggering}
+                      className="btn btn-primary"
+                      style={{ fontSize: '0.82rem', padding: '7px 14px', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                    >
+                      <RefreshCw size={13} className={rescoringTriggering ? 'spin' : ''} />
+                      {rescoringTriggering ? 'Simulating...' : 'Run Simulation'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Simulation History Table */}
+            <div>
+              <h4 style={{ fontSize: '0.9rem', color: '#f8fafc', marginBottom: 10 }}>Past Impact Simulations ({rescoreJobs.length})</h4>
+              <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.8rem' }}>
+                    <thead>
+                      <tr style={{ background: 'rgba(30, 41, 59, 0.7)', borderBottom: '1px solid var(--border-subtle)', color: 'var(--text-dim)' }}>
+                        <th style={{ padding: '8px 12px', fontWeight: 600 }}>Job ID</th>
+                        <th style={{ padding: '8px 12px', fontWeight: 600 }}>Status</th>
+                        <th style={{ padding: '8px 12px', fontWeight: 600 }}>Items Evaluated</th>
+                        <th style={{ padding: '8px 12px', fontWeight: 600 }}>Completed At</th>
+                        <th style={{ padding: '8px 12px', fontWeight: 600, textAlign: 'right' }}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rescoreJobs.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} style={{ padding: 24, textAlign: 'center', color: 'var(--text-dim)' }}>
+                            No rescoring simulation batches executed yet.
+                          </td>
+                        </tr>
+                      ) : (
+                        rescoreJobs.map((j) => (
+                          <tr key={j.id || j.job_id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                            <td style={{ padding: '8px 12px', fontFamily: 'monospace', color: '#a5b4fc' }}>
+                              {(j.id || j.job_id).substring(0, 18)}...
+                            </td>
+                            <td style={{ padding: '8px 12px' }}>
+                              <span className={`badge ${j.status === 'completed' ? 'badge-success' : 'badge-neutral'}`}>
+                                {j.status}
+                              </span>
+                            </td>
+                            <td style={{ padding: '8px 12px', color: '#f8fafc' }}>
+                              {j.completed_items || j.total_items || 0} / {j.total_items || 0}
+                            </td>
+                            <td style={{ padding: '8px 12px', color: 'var(--text-dim)' }}>
+                              {j.completed_at ? new Date(j.completed_at).toLocaleString() : 'In Progress'}
+                            </td>
+                            <td style={{ padding: '8px 12px', textAlign: 'right' }}>
+                              <button
+                                onClick={() => setSelectedRescoreJob(j)}
+                                className="btn btn-secondary"
+                                style={{ padding: '3px 8px', fontSize: '0.72rem' }}
+                              >
+                                View Impact
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            {/* Selected Job Drilldown */}
+            {selectedRescoreJob && (
+              <div className="card" style={{ marginTop: 16, background: 'rgba(0,0,0,0.2)' }}>
+                <div className="flex-between" style={{ marginBottom: 10 }}>
+                  <strong style={{ color: '#c084fc', fontSize: '0.88rem' }}>Simulation Summary Details</strong>
+                  <button onClick={() => setSelectedRescoreJob(null)} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '0.75rem' }}>
+                    Dismiss
+                  </button>
+                </div>
+                <div style={{ fontSize: '0.8rem', color: '#cbd5e1', lineHeight: 1.5 }}>
+                  <div>Total items evaluated: <strong>{selectedRescoreJob.total_items}</strong></div>
+                  <div>Status: <strong>{selectedRescoreJob.status}</strong></div>
+                  {selectedRescoreJob.summary && (
+                    <pre style={{ marginTop: 8, padding: 10, background: '#0b0f19', borderRadius: 6, fontSize: '0.75rem', overflowX: 'auto' }}>
+                      {JSON.stringify(selectedRescoreJob.summary, null, 2)}
+                    </pre>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div style={{ marginTop: 20, textAlign: 'right' }}>
+              <button onClick={() => setRescoreModalOpen(false)} className="btn btn-secondary">
+                Close Hub
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mandatory Excel Import Modal */}
+      {excelModalOpen && (
+        <ExcelImportModal
+          isOpen={excelModalOpen}
+          onClose={() => setExcelModalOpen(false)}
+          onSuccess={() => loadData()}
+        />
+      )}
+
+      {/* Mandatory Brand Profile Modal */}
+      {brandProfileModalOpen && (
+        <BrandProfileModal
+          isOpen={brandProfileModalOpen}
+          onClose={() => setBrandProfileModalOpen(false)}
+          onSaved={() => loadData()}
+        />
+      )}
     </div>
   );
 };
