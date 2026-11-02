@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 # System limits for advertisement image processing
 MAX_UPLOAD_SIZE_BYTES = 15 * 1024 * 1024  # 15 MB
 MAX_IMAGE_DIM = 4096  # 4096 px maximum dimension
-MAX_PROCESSING_DIM = 1400  # 1400 px longest edge for governance operations
+MAX_PROCESSING_DIM = 1400  # 1400 px longest edge for standardized safe image governance
 ALLOWED_IMAGE_FORMATS = {"PNG", "JPEG", "WEBP"}
 ALLOWED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 
@@ -36,6 +36,8 @@ class GovernanceImageContext:
     processing_height: int
     scale: float  # processing_dim / original_dim (1.0 if not downsampled)
     is_downsampled: bool
+    original_format: str = "UNKNOWN"
+    original_mode: str = "RGB"
 
 
 def validate_advertisement_image_bytes(file_bytes: bytes, filename: str) -> ImageValidationResult:
@@ -123,6 +125,8 @@ def get_governance_processing_image(
         with Image.open(original_local_path) as orig_img:
             transposed = ImageOps.exif_transpose(orig_img)
             orig_w, orig_h = transposed.size
+            orig_format = orig_img.format or "UNKNOWN"
+            orig_mode = transposed.mode or "RGB"
     except Exception as e:
         # Corrupt, truncated, or unsupported format: return context pointing to original path
         # so downstream validators and OCR can emit specific domain findings safely
@@ -134,7 +138,9 @@ def get_governance_processing_image(
             processing_width=0,
             processing_height=0,
             scale=1.0,
-            is_downsampled=False
+            is_downsampled=False,
+            original_format="UNKNOWN",
+            original_mode="RGB"
         )
 
     longest_edge = max(orig_w, orig_h)
@@ -147,7 +153,9 @@ def get_governance_processing_image(
             processing_width=orig_w,
             processing_height=orig_h,
             scale=1.0,
-            is_downsampled=False
+            is_downsampled=False,
+            original_format=orig_format,
+            original_mode=orig_mode
         )
 
     # Calculate proportional downscaled dimensions
@@ -178,7 +186,9 @@ def get_governance_processing_image(
             processing_width=proc_w,
             processing_height=proc_h,
             scale=scale,
-            is_downsampled=True
+            is_downsampled=True,
+            original_format=orig_format,
+            original_mode=orig_mode
         )
 
     # Generate the standardized processing copy
@@ -204,7 +214,9 @@ def get_governance_processing_image(
             processing_width=orig_w,
             processing_height=orig_h,
             scale=1.0,
-            is_downsampled=False
+            is_downsampled=False,
+            original_format=orig_format,
+            original_mode=orig_mode
         )
 
     return GovernanceImageContext(
@@ -215,6 +227,8 @@ def get_governance_processing_image(
         processing_width=proc_w,
         processing_height=proc_h,
         scale=scale,
-        is_downsampled=True
+        is_downsampled=True,
+        original_format=orig_format,
+        original_mode=orig_mode
     )
 

@@ -119,12 +119,20 @@ class HeavyImageGovernanceLimiter:
 
     @contextlib.contextmanager
     def slot(self):
-        """Context manager guaranteeing safe acquisition and release."""
+        """Context manager guaranteeing safe acquisition, release, and heap reclamation."""
         self.acquire()
         try:
             yield
         finally:
             self.release()
+            try:
+                import gc
+                gc.collect()
+                import ctypes
+                libc = ctypes.CDLL("libc.so.6")
+                libc.malloc_trim(0)
+            except Exception:
+                pass
 
     def get_status(self) -> dict:
         """Returns current operational metrics."""

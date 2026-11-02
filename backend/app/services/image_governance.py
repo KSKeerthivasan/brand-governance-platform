@@ -203,14 +203,21 @@ class ImageGovernanceService:
             # CHECK 1: Format, Dimensions & Aspect Ratio
             # (Evaluated against original asset dimensions and EXIF orientation)
             # -------------------------------------------------------------
-            eval_orig_path = original_file_path or (proc_ctx.original_path if proc_ctx else file_path)
-            with Image.open(eval_orig_path) as pil_img:
-                from PIL import ImageOps
-                transposed = ImageOps.exif_transpose(pil_img)
-                width, height = transposed.size
-                mode = transposed.mode
-                format_name = pil_img.format or "UNKNOWN"
+            if proc_ctx and proc_ctx.original_width and proc_ctx.original_height:
+                width = proc_ctx.original_width
+                height = proc_ctx.original_height
+                format_name = getattr(proc_ctx, "original_format", "UNKNOWN")
+                mode = getattr(proc_ctx, "original_mode", "RGB")
                 actual_ratio = width / max(height, 1)
+            else:
+                eval_orig_path = original_file_path or (proc_ctx.original_path if proc_ctx else file_path)
+                with Image.open(eval_orig_path) as pil_img:
+                    from PIL import ImageOps
+                    transposed = ImageOps.exif_transpose(pil_img)
+                    width, height = transposed.size
+                    mode = transposed.mode
+                    format_name = pil_img.format or "UNKNOWN"
+                    actual_ratio = width / max(height, 1)
 
             spec = CHANNEL_DIMENSION_STANDARDS.get(channel, CHANNEL_DIMENSION_STANDARDS["Social Media"])
             min_w = spec.get("min_width", 800)
@@ -1171,6 +1178,10 @@ class ImageGovernanceService:
         Performs multi-scale OpenCV template matching to locate official logo in poster.
         Returns (max_correlation, (x, y)).
         """
+        poster = None
+        logo = None
+        gray_poster = None
+        gray_logo = None
         try:
             poster = cv2.imread(poster_path)
             logo = cv2.imread(logo_path)
@@ -1214,5 +1225,9 @@ class ImageGovernanceService:
             return float(best_val), best_loc
         except Exception:
             return 0.0, (0, 0)
+        finally:
+            del poster, logo, gray_poster, gray_logo
+            import gc
+            gc.collect()
 
 image_governance = ImageGovernanceService()

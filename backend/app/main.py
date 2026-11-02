@@ -1,3 +1,13 @@
+import os
+# Constrain glibc malloc arenas on Linux to eliminate native memory fragmentation
+os.environ.setdefault("MALLOC_ARENA_MAX", "2")
+# Restrict OpenCV threading pool to 1 thread on resource-constrained containers
+try:
+    import cv2
+    cv2.setNumThreads(1)
+except Exception:
+    pass
+
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, status

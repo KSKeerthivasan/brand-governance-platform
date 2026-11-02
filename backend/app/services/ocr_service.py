@@ -38,8 +38,14 @@ class OCRService:
     def _get_engine(self):
         """Lazy load RapidOCR engine on first usage to optimize application startup."""
         if self._engine is None:
+            try:
+                import cv2
+                cv2.setNumThreads(1)
+            except Exception:
+                pass
             from rapidocr_onnxruntime import RapidOCR
-            self._engine = RapidOCR()
+            # Restrict thread execution to 1 to eliminate thread pool overhead and multi-arena memory inflation on Linux containers
+            self._engine = RapidOCR(intra_op_num_threads=1, inter_op_num_threads=1)
         return self._engine
 
     def extract_text_from_image(
@@ -76,13 +82,16 @@ class OCRService:
                 # RapidOCR expects BGR format when passing a numpy array
                 bgr_array = cv2.cvtColor(np.array(resized_pil.convert("RGB")), cv2.COLOR_RGB2BGR)
                 engine = self._get_engine()
-                raw_result, elapse = engine(bgr_array)
+                raw_result, elapse = engine(bgr_array, use_cls=False)
             except Exception as e:
                 return OCRResult(
                     status="failed",
                     error_message=f"OCR execution failure on in-memory image: {str(e)}",
                     latency_ms=(time.time() - t0) * 1000
                 )
+            finally:
+                if 'bgr_array' in locals():
+                    del bgr_array
         else:
             file_path = file_path_or_image
             if not file_path or not os.path.exists(file_path):
@@ -113,6 +122,8 @@ class OCRService:
                 )
 
             max_dim = max(w, h)
+            cv_img = None
+            resized = None
             try:
                 engine = self._get_engine()
                 if max_dim > MAX_OCR_DIM and original_scale is None:
@@ -121,15 +132,20 @@ class OCRService:
                     cv_img = cv2.imread(file_path)
                     new_w, new_h = max(1, int(round(w * scale))), max(1, int(round(h * scale)))
                     resized = cv2.resize(cv_img, (new_w, new_h), interpolation=cv2.INTER_AREA)
-                    raw_result, elapse = engine(resized)
+                    raw_result, elapse = engine(resized, use_cls=False)
                 else:
-                    raw_result, elapse = engine(file_path)
+                    raw_result, elapse = engine(file_path, use_cls=False)
             except Exception as e:
                 return OCRResult(
                     status="failed",
                     error_message=f"OCR execution failure: {str(e)}",
                     latency_ms=(time.time() - t0) * 1000
                 )
+            finally:
+                if cv_img is not None:
+                    del cv_img
+                if resized is not None:
+                    del resized
 
         latency_ms = (time.time() - t0) * 1000
 
