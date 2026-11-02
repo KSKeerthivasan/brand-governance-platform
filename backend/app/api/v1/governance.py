@@ -13,6 +13,7 @@ from app.schemas.governance import (
 from app.services.governance_engine import governance_engine
 from app.services.image_governance import image_governance
 from app.services.suggestion_service import suggestion_service
+from app.services.concurrency_limiter import image_governance_limiter
 from app.services.audit import log_audit_event
 from app.api.deps import get_current_user, require_any_member, require_content_creator
 
@@ -42,16 +43,27 @@ def run_governance_check(
     if not item:
         raise HTTPException(status_code=403, detail="Tenant Isolation: Content does not belong to your organization.")
 
-    # Execute deterministic governance engine
-    run = governance_engine.evaluate_content_version(
-        db=db,
-        content_version=version,
-        executed_by_user_id=current_user.id,
-        product_id=req.product_id
-    )
-
-    # Milestone 5D: Generate explainable, context-preserving correction suggestions
-    suggestion_service.generate_suggestions_for_run(db=db, run=run)
+    # Execute deterministic governance engine with concurrency control for heavy posters
+    has_poster = bool(version.poster_file_path)
+    if has_poster:
+        with image_governance_limiter.slot():
+            run = governance_engine.evaluate_content_version(
+                db=db,
+                content_version=version,
+                executed_by_user_id=current_user.id,
+                product_id=req.product_id
+            )
+            # Milestone 5D: Generate explainable, context-preserving correction suggestions
+            suggestion_service.generate_suggestions_for_run(db=db, run=run)
+    else:
+        run = governance_engine.evaluate_content_version(
+            db=db,
+            content_version=version,
+            executed_by_user_id=current_user.id,
+            product_id=req.product_id
+        )
+        # Milestone 5D: Generate explainable, context-preserving correction suggestions
+        suggestion_service.generate_suggestions_for_run(db=db, run=run)
 
     log_audit_event(
         db=db,

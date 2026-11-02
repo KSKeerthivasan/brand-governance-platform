@@ -536,9 +536,17 @@ class GovernanceEngine:
         # ==========================================
         poster_text = ""
         ocr_result: Optional[OCRResult] = None
+        proc_ctx = None
         if content_version.poster_file_path:
             local_poster_path = storage_service.get_file_path_for_processing(content_version.poster_file_path)
-            ocr_result = ocr_service.extract_text_from_image(local_poster_path)
+            from app.services.image_processing import get_governance_processing_image
+            proc_ctx = get_governance_processing_image(local_poster_path)
+            ocr_result = ocr_service.extract_text_from_image(proc_ctx.processing_path)
+            if proc_ctx.scale != 1.0 and ocr_result and getattr(ocr_result, "regions", None):
+                for r in ocr_result.regions:
+                    if r.processing_bbox is None:
+                        r.processing_bbox = r.bbox
+                        r.bbox = [[float(c[0]) / proc_ctx.scale, float(c[1]) / proc_ctx.scale] for c in r.processing_bbox]
             if ocr_result.status in ("success", "low_confidence"):
                 poster_text = ocr_result.extracted_text
 
@@ -1162,7 +1170,9 @@ class GovernanceEngine:
         if content_version.poster_file_path:
             local_poster_path = storage_service.get_file_path_for_processing(content_version.poster_file_path)
             visual_findings = image_governance.evaluate_poster_for_governance(
-                file_path=local_poster_path,
+                file_path=proc_ctx.processing_path if proc_ctx else local_poster_path,
+                original_file_path=local_poster_path,
+                proc_ctx=proc_ctx,
                 channel=channel,
                 alt_text=content_version.poster_alt_text,
                 org_id=org_id,

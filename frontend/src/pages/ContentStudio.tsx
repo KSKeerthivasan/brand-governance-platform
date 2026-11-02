@@ -344,6 +344,23 @@ export const ContentStudio: React.FC = () => {
       return;
     }
 
+    const MAX_UPLOAD_BYTES = 15 * 1024 * 1024; // 15 MB
+    if (file.size > MAX_UPLOAD_BYTES) {
+      alert('File size exceeds maximum allowed limit of 15 MB.');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
+    const validExts = ['.png', '.jpg', '.jpeg', '.webp'];
+    const validMimes = ['image/png', 'image/jpeg', 'image/webp'];
+    const hasValidExt = validExts.some(ext => file.name.toLowerCase().endsWith(ext));
+    const hasValidMime = validMimes.includes((file.type || '').toLowerCase());
+    if (!hasValidExt && !hasValidMime) {
+      alert('Unsupported file format. Please upload an image creative in PNG, JPG, or WEBP format.');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
     setUploadingPoster(true);
     try {
       const uploadRes = await api.uploadPoster(file);
@@ -1150,7 +1167,7 @@ export const ContentStudio: React.FC = () => {
                     {uploadingPoster ? 'Uploading creative...' : 'Upload Advertisement Creative Artwork'}
                   </div>
                   <div style={{ fontSize: '0.74rem', color: 'var(--text-dim)', marginTop: 4 }}>
-                    Supports PNG, JPG, or WEBP up to 25MB.
+                    Supports PNG, JPG, or WEBP up to 15MB (max 4096 px).
                   </div>
                   <input
                     type="file"

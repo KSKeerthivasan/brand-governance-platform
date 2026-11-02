@@ -173,12 +173,15 @@ class ImageGovernanceService:
         brand_id: Optional[str] = None,
         ocr_result: Optional[OCRResult] = None,
         page_number: Optional[int] = None,
-        resolved_kb: Optional[Any] = None
+        resolved_kb: Optional[Any] = None,
+        original_file_path: Optional[str] = None,
+        proc_ctx: Optional[Any] = None
     ) -> List[GovernanceFinding]:
         """
         Executes unified, deterministic visual checks on an advertisement poster.
         Returns a list of GovernanceFinding models with categorized results.
         Enforces organization and brand isolation using approved knowledge.
+        Operates on an optimized processing copy while inspecting original dimensions for channel standards.
         """
         findings: List[GovernanceFinding] = []
 
@@ -198,10 +201,14 @@ class ImageGovernanceService:
         try:
             # -------------------------------------------------------------
             # CHECK 1: Format, Dimensions & Aspect Ratio
+            # (Evaluated against original asset dimensions and EXIF orientation)
             # -------------------------------------------------------------
-            with Image.open(file_path) as pil_img:
-                width, height = pil_img.size
-                mode = pil_img.mode
+            eval_orig_path = original_file_path or (proc_ctx.original_path if proc_ctx else file_path)
+            with Image.open(eval_orig_path) as pil_img:
+                from PIL import ImageOps
+                transposed = ImageOps.exif_transpose(pil_img)
+                width, height = transposed.size
+                mode = transposed.mode
                 format_name = pil_img.format or "UNKNOWN"
                 actual_ratio = width / max(height, 1)
 
@@ -323,7 +330,8 @@ class ImageGovernanceService:
             # -------------------------------------------------------------
             contrast_findings = self._evaluate_localized_text_contrast(
                 file_path=file_path,
-                ocr_result=ocr_result
+                ocr_result=ocr_result,
+                scale=proc_ctx.scale if proc_ctx else 1.0
             )
             findings.extend(contrast_findings)
 
@@ -845,13 +853,15 @@ class ImageGovernanceService:
     def _evaluate_localized_text_contrast(
         self,
         file_path: str,
-        ocr_result: Optional[OCRResult] = None
+        ocr_result: Optional[OCRResult] = None,
+        scale: float = 1.0
     ) -> List[GovernanceFinding]:
         """
         Evaluates localized text contrast for each OCR-detected text region and emits
         defensible WCAG findings grounded in localized pixel evidence.
         """
         findings: List[GovernanceFinding] = []
+        cv_img = None
         try:
             cv_img = cv2.imread(file_path)
             if cv_img is None:
@@ -885,8 +895,21 @@ class ImageGovernanceService:
                 ))
                 return findings
 
-            # Estimate contrast per region
-            region_results = self.estimate_localized_text_contrast(cv_img, ocr_result.regions)
+            # Estimate contrast per region matching cv_img dimensions
+            regions_for_contrast = []
+            for r in ocr_result.regions:
+                target_bbox = r.processing_bbox if r.processing_bbox is not None else r.bbox
+                regions_for_contrast.append(OCRRegion(
+                    text=r.text,
+                    confidence=r.confidence,
+                    bbox=target_bbox,
+                    processing_bbox=r.processing_bbox,
+                    is_known_large_text=r.is_known_large_text,
+                    is_known_normal_text=r.is_known_normal_text,
+                    typography_metadata=r.typography_metadata
+                ))
+
+            region_results = self.estimate_localized_text_contrast(cv_img, regions_for_contrast)
             if not region_results:
                 findings.append(GovernanceFinding(
                     category="contrast",
@@ -900,6 +923,11 @@ class ImageGovernanceService:
                 ))
                 return findings
 
+            def _rescale_bbox(b):
+                if scale != 1.0 and b:
+                    return [[float(c[0]) / scale, float(c[1]) / scale] for c in b]
+                return b
+
             failing_regions = [r for r in region_results if r.status == "fail"]
             marginal_regions = [r for r in region_results if r.status == "marginal"]
             inconclusive_regions = [r for r in region_results if r.status == "inconclusive"]
@@ -907,7 +935,7 @@ class ImageGovernanceService:
 
             # Add findings for failing regions
             for reg in failing_regions:
-                bbox_str = str([[round(p[0], 1), round(p[1], 1)] for p in reg.bbox])
+                bbox_str = str([[round(p[0], 1), round(p[1], 1)] for p in _rescale_bbox(reg.bbox)])
                 is_crit = reg.contrast_ratio < 3.0
                 class_label = reg.font_classification.replace("_", " ")
                 findings.append(GovernanceFinding(
@@ -928,7 +956,7 @@ class ImageGovernanceService:
 
             # Add findings for marginal regions (unknown raster typography in 3:1 to 4.5:1 range)
             for reg in marginal_regions:
-                bbox_str = str([[round(p[0], 1), round(p[1], 1)] for p in reg.bbox])
+                bbox_str = str([[round(p[0], 1), round(p[1], 1)] for p in _rescale_bbox(reg.bbox)])
                 class_label = reg.font_classification.replace("_", " ")
                 findings.append(GovernanceFinding(
                     category="contrast",
@@ -948,7 +976,7 @@ class ImageGovernanceService:
 
             # Add findings for inconclusive regions (unreliable separation, extreme boundary, low OCR confidence)
             for reg in inconclusive_regions:
-                bbox_str = str([[round(p[0], 1), round(p[1], 1)] for p in reg.bbox])
+                bbox_str = str([[round(p[0], 1), round(p[1], 1)] for p in _rescale_bbox(reg.bbox)])
                 findings.append(GovernanceFinding(
                     category="contrast",
                     severity="warning",
@@ -967,7 +995,7 @@ class ImageGovernanceService:
             # If all regions passed, or to document passing regions:
             if passing_regions and not failing_regions and not marginal_regions and not inconclusive_regions:
                 min_pass = min(passing_regions, key=lambda r: r.contrast_ratio)
-                bbox_str = str([[round(p[0], 1), round(p[1], 1)] for p in min_pass.bbox])
+                bbox_str = str([[round(p[0], 1), round(p[1], 1)] for p in _rescale_bbox(min_pass.bbox)])
                 all_verified_large = all(r.font_classification == "verified_large_text" for r in passing_regions)
                 if all_verified_large:
                     title_text = f"WCAG AA Contrast Verified (Large Typography Criterion) across {len(passing_regions)} Region{'s' if len(passing_regions) > 1 else ''}"
@@ -1016,6 +1044,11 @@ class ImageGovernanceService:
                 recommended_action="Visually verify image legibility.",
                 status="unable_to_verify"
             ))
+        finally:
+            if cv_img is not None:
+                del cv_img
+                import gc
+                gc.collect()
 
         return findings
 

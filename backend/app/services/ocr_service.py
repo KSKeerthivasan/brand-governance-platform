@@ -9,7 +9,8 @@ import numpy as np
 class OCRRegion:
     text: str
     confidence: float
-    bbox: List[List[float]]  # [[x1, y1], [x2, y2], [x3, y3], [x4, y4]]
+    bbox: List[List[float]]  # [[x1, y1], [x2, y2], [x3, y3], [x4, y4]] in original image coordinates
+    processing_bbox: Optional[List[List[float]]] = None  # coordinates in processing/downsampled image
     is_known_large_text: Optional[bool] = None
     is_known_normal_text: Optional[bool] = None
     typography_metadata: Optional[Dict[str, Any]] = None
@@ -41,22 +42,31 @@ class OCRService:
             self._engine = RapidOCR()
         return self._engine
 
-    def extract_text_from_image(self, file_path_or_image: Union[str, Image.Image]) -> OCRResult:
+    def extract_text_from_image(
+        self,
+        file_path_or_image: Union[str, Image.Image],
+        *args,
+        **kwargs
+    ) -> OCRResult:
         """
         Extract visible text and bounding boxes from a local raster image file or PIL Image.
+        Standardizes inference resolution to max 1400px on the longest edge.
         Safely handles missing, corrupt, unsupported, or textless images.
         """
         t0 = time.time()
-        MAX_OCR_DIM = 1800
-        scale = 1.0
+        MAX_OCR_DIM = 1400
+        original_scale = kwargs.get("original_scale")
+        if original_scale is None and args:
+            original_scale = args[0]
+        scale = original_scale if original_scale is not None else 1.0
 
         if isinstance(file_path_or_image, Image.Image):
             pil_img = file_path_or_image
             w, h = pil_img.size
             max_dim = max(w, h)
-            if max_dim > MAX_OCR_DIM:
+            if max_dim > MAX_OCR_DIM and original_scale is None:
                 scale = MAX_OCR_DIM / float(max_dim)
-                new_w, new_h = max(1, int(w * scale)), max(1, int(h * scale))
+                new_w, new_h = max(1, int(round(w * scale))), max(1, int(round(h * scale)))
                 resized_pil = pil_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
             else:
                 resized_pil = pil_img
@@ -105,11 +115,11 @@ class OCRService:
             max_dim = max(w, h)
             try:
                 engine = self._get_engine()
-                if max_dim > MAX_OCR_DIM:
+                if max_dim > MAX_OCR_DIM and original_scale is None:
                     import cv2
                     scale = MAX_OCR_DIM / float(max_dim)
                     cv_img = cv2.imread(file_path)
-                    new_w, new_h = max(1, int(w * scale)), max(1, int(h * scale))
+                    new_w, new_h = max(1, int(round(w * scale))), max(1, int(round(h * scale)))
                     resized = cv2.resize(cv_img, (new_w, new_h), interpolation=cv2.INTER_AREA)
                     raw_result, elapse = engine(resized)
                 else:
@@ -138,17 +148,18 @@ class OCRService:
 
         for item in raw_result:
             if len(item) >= 3:
-                bbox, text, score = item[0], item[1], float(item[2])
+                raw_bbox, text, score = item[0], item[1], float(item[2])
                 cleaned_text = str(text).strip()
                 if cleaned_text:
                     if scale != 1.0:
-                        scaled_bbox = [[float(c[0]) / scale, float(c[1]) / scale] for c in bbox]
+                        scaled_bbox = [[float(c[0]) / scale, float(c[1]) / scale] for c in raw_bbox]
                     else:
-                        scaled_bbox = bbox
+                        scaled_bbox = raw_bbox
                     regions.append(OCRRegion(
                         text=cleaned_text,
                         confidence=score,
-                        bbox=scaled_bbox
+                        bbox=scaled_bbox,
+                        processing_bbox=raw_bbox
                     ))
                     text_lines.append(cleaned_text)
                     confidences.append(score)

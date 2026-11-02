@@ -33,7 +33,11 @@ async def upload_poster(
 ):
     """
     Upload an advertisement creative image (PNG, JPG, or WEBP) to accompany a marketing content draft.
-    PDF advertisement uploads are rejected.
+    Enforces strict upload validation:
+    - Maximum size: 15 MB
+    - Maximum dimensions: 4096 px
+    - Validates image content, true format, and integrity
+    - Rejects PDFs and unsupported formats
     """
     filename_lower = (file.filename or "").lower()
     content_type_lower = (file.content_type or "").lower()
@@ -52,6 +56,39 @@ async def upload_poster(
             detail="Unsupported file format. Please upload an image creative in PNG, JPG, or WEBP format."
         )
 
+    # Read and buffer bytes with strict 15MB limit
+    MAX_UPLOAD_SIZE = 15 * 1024 * 1024
+    if hasattr(file, "size") and file.size and file.size > MAX_UPLOAD_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File size exceeds maximum allowed limit of 15 MB."
+        )
+
+    chunks = []
+    total_bytes = 0
+    while chunk := await file.read(1024 * 1024):
+        total_bytes += len(chunk)
+        if total_bytes > MAX_UPLOAD_SIZE:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="File size exceeds maximum allowed limit of 15 MB."
+            )
+        chunks.append(chunk)
+
+    file_bytes = b"".join(chunks)
+
+    # Validate actual image content, dimensions, and integrity
+    from app.services.image_processing import validate_advertisement_image_bytes, get_governance_processing_image
+    try:
+        val_res = validate_advertisement_image_bytes(file_bytes, file.filename or "")
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+    # Save original image to durable storage
+    await file.seek(0)
     dest_path, bytes_written = await storage_service.save_file(
         file=file,
         org_id=membership.organization_id,
@@ -60,13 +97,9 @@ async def upload_poster(
     safe_filename = os.path.basename(dest_path)
     local_path = storage_service.get_file_path_for_processing(dest_path)
 
-    width, height, mode, format_name = None, None, "RGB", "PNG"
+    # Pre-generate optimized processing copy so future governance runs are instant
     try:
-        from PIL import Image
-        with Image.open(local_path) as img:
-            width, height = img.size
-            mode = img.mode
-            format_name = img.format or "PNG"
+        get_governance_processing_image(local_path)
     except Exception:
         pass
 
@@ -74,10 +107,10 @@ async def upload_poster(
         "file_path": dest_path,
         "filename": safe_filename,
         "is_pdf": False,
-        "width": width,
-        "height": height,
-        "color_mode": mode,
-        "format": format_name,
+        "width": val_res.width,
+        "height": val_res.height,
+        "color_mode": val_res.color_mode,
+        "format": val_res.format_name,
         "size_bytes": bytes_written,
         "page_count": 1,
         "pages": []
