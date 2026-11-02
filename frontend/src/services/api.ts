@@ -52,10 +52,21 @@ class ApiService {
       headers.set('Content-Type', 'application/json');
     }
 
-    const res = await fetch(`${API_BASE}${endpoint}`, {
-      ...options,
-      headers
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${API_BASE}${endpoint}`, {
+        ...options,
+        headers
+      });
+    } catch (netErr: any) {
+      const isFetchError = netErr?.name === 'TypeError' || netErr?.message?.toLowerCase().includes('fetch');
+      if (isFetchError) {
+        throw new Error(
+          `Unable to connect to backend (${API_BASE || 'local server'}). If the service is warming up (e.g. Render free tier cold-start), please wait ~30 seconds and retry.`
+        );
+      }
+      throw netErr;
+    }
 
     if (!res.ok) {
       let errorMsg = `Request failed (${res.status})`;
@@ -367,11 +378,29 @@ class ApiService {
   }
 
   // Governance Checks
-  async runGovernanceCheck(contentVersionId: string): Promise<GovernanceRun> {
-    return this.request<GovernanceRun>('/governance/run', {
-      method: 'POST',
-      body: JSON.stringify({ content_version_id: contentVersionId })
-    });
+  async runGovernanceCheck(contentVersionId: string, productId?: string): Promise<GovernanceRun> {
+    const payload: { content_version_id: string; product_id?: string } = {
+      content_version_id: contentVersionId
+    };
+    if (productId) {
+      payload.product_id = productId;
+    }
+
+    try {
+      return await this.request<GovernanceRun>('/governance/run', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+    } catch (err: any) {
+      if (err.message && err.message.toLowerCase().includes('unable to connect to backend')) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        return await this.request<GovernanceRun>('/governance/run', {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        });
+      }
+      throw err;
+    }
   }
 
   async getLatestGovernanceRun(versionId: string): Promise<GovernanceRun> {

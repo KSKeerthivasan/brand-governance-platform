@@ -104,6 +104,7 @@ export const ContentStudio: React.FC = () => {
   const [selectedProductId, setSelectedProductId] = useState<string>('');
   const [liveInfractions, setLiveInfractions] = useState<any[]>([]);
   const [isLiveChecking, setIsLiveChecking] = useState(false);
+  const [isRealTimeExpanded, setIsRealTimeExpanded] = useState(false);
   const liveCheckDebounceRef = useRef<any>(null);
 
   // Collapsible Drafts Drawer State
@@ -501,7 +502,7 @@ export const ContentStudio: React.FC = () => {
     setChecking(true);
     setGovError(null);
     try {
-      const run = await api.runGovernanceCheck(versionId);
+      const run = await api.runGovernanceCheck(versionId, selectedProductId || undefined);
       setLatestGovRun(run);
       setCheckedVersionId(versionId);
       setCheckedVersionNum(versionNum);
@@ -936,49 +937,117 @@ export const ContentStudio: React.FC = () => {
             />
           </div>
 
-          {/* D. REAL-TIME IN-EDITOR ASSISTANT (Reduced to Compact Status Row + Clean Alerts) */}
+          {/* D. REAL-TIME IN-EDITOR ASSISTANT (Compact Status Row + Expandable Infractions) */}
           <div style={{
-            padding: '10px 14px',
+            padding: '12px 14px',
             borderRadius: 8,
             background: liveInfractions.length > 0
-              ? 'rgba(239, 68, 68, 0.06)'
-              : (bodyText.trim() ? 'rgba(34, 197, 94, 0.05)' : 'rgba(255, 255, 255, 0.02)'),
-            border: `1px solid ${liveInfractions.length > 0 ? 'rgba(239, 68, 68, 0.25)' : (bodyText.trim() ? 'rgba(34, 197, 94, 0.2)' : 'rgba(255, 255, 255, 0.06)')}`
+              ? 'rgba(239, 68, 68, 0.05)'
+              : (bodyText.trim() ? 'rgba(34, 197, 94, 0.04)' : 'rgba(255, 255, 255, 0.02)'),
+            border: `1px solid ${liveInfractions.length > 0 ? 'rgba(239, 68, 68, 0.22)' : (bodyText.trim() ? 'rgba(34, 197, 94, 0.2)' : 'rgba(255, 255, 255, 0.06)')}`
           }}>
             {/* Compact Informational Status Row */}
-            <div className="flex-between" style={{ alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div className="flex-between" style={{ alignItems: 'center', gap: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 <span style={{
                   width: 8,
                   height: 8,
                   borderRadius: '50%',
                   background: isLiveChecking ? '#38bdf8' : (liveInfractions.length > 0 ? '#ef4444' : (bodyText.trim() ? '#22c55e' : '#64748b')),
-                  boxShadow: isLiveChecking ? '0 0 8px #38bdf8' : 'none'
+                  boxShadow: isLiveChecking ? '0 0 8px #38bdf8' : 'none',
+                  flexShrink: 0
                 }} />
                 <span style={{ fontSize: '0.78rem', fontWeight: 600, color: '#e2e8f0', display: 'flex', alignItems: 'center', gap: 6 }}>
                   <Sparkles size={14} color="#818cf8" />
-                  Real-Time Assistant
-                  <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)', fontWeight: 400 }}>
-                    (600ms Debounce • Zero-Billing Local Engine)
+                  In-Editor Real-Time Assistant
+                  <span style={{ fontSize: '0.68rem', color: 'var(--text-dim)', fontWeight: 400 }}>
+                    (Preliminary Copy Checks • 600ms Debounce)
                   </span>
                 </span>
               </div>
 
-              <span style={{
-                fontSize: '0.72rem',
-                fontWeight: 600,
-                padding: '2px 8px',
-                borderRadius: 999,
-                background: liveInfractions.length > 0 ? 'rgba(239, 68, 68, 0.18)' : (bodyText.trim() ? 'rgba(34, 197, 94, 0.12)' : 'rgba(255, 255, 255, 0.05)'),
-                color: liveInfractions.length > 0 ? '#f87171' : (bodyText.trim() ? '#4ade80' : 'var(--text-dim)')
-              }}>
-                {isLiveChecking ? 'Analyzing...' : (!bodyText.trim() ? 'Awaiting copy' : (liveInfractions.length === 0 ? '✓ Copy is Clean' : `${liveInfractions.length} Issue${liveInfractions.length > 1 ? 's' : ''} Detected`))}
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{
+                  fontSize: '0.72rem',
+                  fontWeight: 600,
+                  padding: '2px 8px',
+                  borderRadius: 999,
+                  background: liveInfractions.length > 0 ? 'rgba(239, 68, 68, 0.18)' : (bodyText.trim() ? 'rgba(34, 197, 94, 0.12)' : 'rgba(255, 255, 255, 0.05)'),
+                  color: liveInfractions.length > 0 ? '#f87171' : (bodyText.trim() ? '#4ade80' : 'var(--text-dim)')
+                }}>
+                  {isLiveChecking ? 'Analyzing...' : (!bodyText.trim() ? 'Awaiting copy' : (liveInfractions.length === 0 ? '✓ Copy is Clean' : `${liveInfractions.length} Issue${liveInfractions.length > 1 ? 's' : ''} Detected`))}
+                </span>
+
+                {liveInfractions.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setIsRealTimeExpanded(!isRealTimeExpanded)}
+                    style={{
+                      background: 'transparent',
+                      border: '1px solid rgba(255,255,255,0.12)',
+                      borderRadius: 4,
+                      color: 'var(--text-muted)',
+                      fontSize: '0.7rem',
+                      padding: '2px 8px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4
+                    }}
+                  >
+                    {isRealTimeExpanded ? 'Hide Details ▲' : 'Show Details ▼'}
+                  </button>
+                )}
+              </div>
             </div>
 
-            {/* In-Editor Live Infractions List */}
-            {liveInfractions.length > 0 && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
+            {/* Concise Summary when collapsed */}
+            {liveInfractions.length > 0 && !isRealTimeExpanded && (
+              <div style={{
+                marginTop: 8,
+                padding: '6px 10px',
+                borderRadius: 6,
+                background: 'rgba(0,0,0,0.2)',
+                fontSize: '0.73rem',
+                color: 'var(--text-muted)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 8
+              }}>
+                <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <span style={{ color: '#fca5a5', fontWeight: 600 }}>Summary:</span> {liveInfractions.map(i => i.title).join(' • ')}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsRealTimeExpanded(true)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: '#818cf8',
+                    cursor: 'pointer',
+                    fontSize: '0.7rem',
+                    textDecoration: 'underline',
+                    whiteSpace: 'nowrap',
+                    padding: 0
+                  }}
+                >
+                  Review & Fix
+                </button>
+              </div>
+            )}
+
+            {/* Contained Expandable In-Editor Live Infractions List */}
+            {liveInfractions.length > 0 && isRealTimeExpanded && (
+              <div style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 6,
+                marginTop: 10,
+                maxHeight: 220,
+                overflowY: 'auto',
+                paddingRight: 4
+              }}>
                 {liveInfractions.map((inf) => (
                   <div key={inf.id} style={{
                     display: 'flex',
@@ -987,15 +1056,16 @@ export const ContentStudio: React.FC = () => {
                     padding: '8px 10px',
                     borderRadius: 6,
                     background: 'rgba(0,0,0,0.25)',
-                    border: '1px solid rgba(255,255,255,0.06)'
+                    border: '1px solid rgba(255,255,255,0.06)',
+                    gap: 8
                   }}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginRight: 8 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginRight: 8, flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: '0.78rem', fontWeight: 600, color: inf.severity === 'error' ? '#f87171' : '#fbbf24', display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <AlertTriangle size={13} />
-                        {inf.title}
-                        {inf.rule_code && <span style={{ fontSize: '0.68rem', opacity: 0.7 }}>[{inf.rule_code}]</span>}
+                        <AlertTriangle size={13} style={{ flexShrink: 0 }} />
+                        <span>{inf.title}</span>
+                        {inf.rule_code && <span style={{ fontSize: '0.68rem', opacity: 0.7, fontFamily: 'monospace' }}>[{inf.rule_code}]</span>}
                       </div>
-                      <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', lineHeight: 1.35 }}>
                         {inf.explanation}
                       </div>
                     </div>
@@ -1009,7 +1079,8 @@ export const ContentStudio: React.FC = () => {
                           fontSize: '0.72rem',
                           background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
                           whiteSpace: 'nowrap',
-                          gap: 4
+                          gap: 4,
+                          flexShrink: 0
                         }}
                       >
                         <Sparkles size={12} /> Auto-Fix
@@ -1303,22 +1374,39 @@ export const ContentStudio: React.FC = () => {
         {/* =================================================================== */}
         {/* RIGHT COLUMN: UNIFIED GOVERNANCE PANEL (35–40% width) */}
         {/* =================================================================== */}
-        <div className="card" style={{ display: 'flex', flexDirection: 'column', padding: 22, gap: 16 }}>
-          {/* Header */}
-          <div className="flex-between" style={{ alignItems: 'flex-start' }}>
+        <div className="card" style={{
+          display: 'flex',
+          flexDirection: 'column',
+          padding: 24,
+          gap: 16,
+          boxSizing: 'border-box',
+          overflow: 'visible'
+        }}>
+          {/* Header with clear top alignment, zero clipping, and prominent labelling */}
+          <div className="flex-between" style={{ alignItems: 'flex-start', minHeight: 48, paddingTop: 2 }}>
             <div>
-              <h2 className="title-md" style={{ display: 'flex', alignItems: 'center', gap: 8, margin: 0 }}>
-                <Sparkles size={18} color="#818cf8" /> Unified Governance
-              </h2>
-              {latestGovRun && checkedVersionNum && (
-                <div style={{ fontSize: '0.74rem', color: 'var(--text-dim)', marginTop: 4 }}>
-                  Evaluated on <strong>Version {checkedVersionNum}</strong>
-                  {checkedVersionId && <span style={{ fontFamily: 'monospace', marginLeft: 4 }}>({checkedVersionId.slice(0, 8)})</span>}
-                </div>
-              )}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Sparkles size={18} color="#818cf8" style={{ flexShrink: 0 }} />
+                <h2 className="title-md" style={{ margin: 0, lineHeight: 1.4, fontSize: '1.05rem', color: '#f8fafc' }}>
+                  Authoritative Unified Governance
+                </h2>
+              </div>
+              <div style={{ fontSize: '0.74rem', color: 'var(--text-dim)', marginTop: 4 }}>
+                {latestGovRun && checkedVersionNum ? (
+                  <>
+                    Official evaluation on <strong>Version {checkedVersionNum}</strong>
+                    {checkedVersionId && <span style={{ fontFamily: 'monospace', marginLeft: 4 }}>({checkedVersionId.slice(0, 8)})</span>}
+                  </>
+                ) : (
+                  'Official evaluation against active Knowledge Base and creative assets'
+                )}
+              </div>
             </div>
             {latestGovRun && (
-              <span className={`badge badge-${latestGovRun.overall_status === 'passed' ? 'success' : (latestGovRun.overall_status === 'warnings' ? 'warning' : 'danger')}`}>
+              <span
+                className={`badge badge-${latestGovRun.overall_status === 'passed' ? 'success' : (latestGovRun.overall_status === 'warnings' ? 'warning' : 'danger')}`}
+                style={{ textTransform: 'uppercase', letterSpacing: '0.04em' }}
+              >
                 {latestGovRun.overall_status.toUpperCase()}
               </span>
             )}
@@ -1327,19 +1415,42 @@ export const ContentStudio: React.FC = () => {
           {/* Actionable Error Banner if check failed */}
           {govError && (
             <div style={{
-              padding: '10px 12px',
+              padding: '12px 14px',
               borderRadius: 8,
               background: 'rgba(239, 68, 68, 0.12)',
               border: '1px solid rgba(239, 68, 68, 0.4)',
               color: '#fca5a5',
               fontSize: '0.78rem',
               display: 'flex',
-              alignItems: 'center',
+              flexDirection: 'column',
               gap: 8
             }}>
-              <XCircle size={16} color="#f87171" style={{ flexShrink: 0 }} />
-              <div>
-                <strong>Execution Error:</strong> {govError}
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                <XCircle size={16} color="#f87171" style={{ flexShrink: 0, marginTop: 2 }} />
+                <div style={{ flex: 1 }}>
+                  <strong style={{ color: '#fecaca', display: 'block', marginBottom: 2 }}>Governance Execution Error</strong>
+                  <span style={{ lineHeight: 1.4 }}>{govError}</span>
+                </div>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 2 }}>
+                <button
+                  type="button"
+                  onClick={handleRunChecks}
+                  disabled={checking}
+                  className="btn btn-secondary"
+                  style={{
+                    padding: '4px 10px',
+                    fontSize: '0.72rem',
+                    background: 'rgba(239, 68, 68, 0.2)',
+                    borderColor: 'rgba(239, 68, 68, 0.5)',
+                    color: '#fef2f2',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6
+                  }}
+                >
+                  <Play size={12} /> {checking ? 'Retrying...' : 'Retry Governance Check'}
+                </button>
               </div>
             </div>
           )}
