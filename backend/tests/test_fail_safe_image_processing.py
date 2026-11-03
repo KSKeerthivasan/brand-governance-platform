@@ -8,6 +8,8 @@ from app.services.image_processing import (
     MAX_UPLOAD_SIZE_BYTES,
     MAX_IMAGE_DIM,
     MAX_PROCESSING_DIM,
+    MAX_PROCESSING_WIDTH,
+    MAX_PROCESSING_HEIGHT,
     validate_advertisement_image_bytes,
     get_governance_processing_image,
     GovernanceImageContext
@@ -467,5 +469,153 @@ class TestGovernanceConcurrencyAPI:
             assert "queue is full" in rejected.json()["detail"]
         finally:
             governance_engine.evaluate_content_version = original_evaluate
+
+
+class TestStandardizedPosterProcessingDimensions:
+    """
+    Verification suite for 835 x 1080 px maximum processing dimensions.
+    Confirms that every processing derivative stays within both maximum dimensions,
+    never stretches or distorts, never upscales smaller images, and maps coordinates accurately.
+    """
+    def test_image_already_sized_835x1080_retained_unchanged(self, tmp_path):
+        src_path = str(tmp_path / "exact_835x1080.png")
+        Image.new("RGB", (835, 1080), color=(100, 150, 200)).save(src_path)
+
+        ctx = get_governance_processing_image(src_path)
+        assert ctx.is_downsampled is False
+        assert ctx.scale == 1.0
+        assert ctx.processing_width == 835
+        assert ctx.processing_height == 1080
+        assert ctx.processing_path == src_path
+        # Original file remains untouched
+        with Image.open(src_path) as orig:
+            assert orig.size == (835, 1080)
+
+    def test_larger_portrait_image_proportionally_fits_within_835x1080(self, tmp_path):
+        # 1856 x 2304 px (V Protect poster dimensions)
+        src_path = str(tmp_path / "large_portrait.png")
+        Image.new("RGB", (1856, 2304), color=(60, 120, 180)).save(src_path)
+
+        ctx = get_governance_processing_image(src_path)
+        assert ctx.is_downsampled is True
+        assert ctx.processing_width <= MAX_PROCESSING_WIDTH  # <= 835
+        assert ctx.processing_height <= MAX_PROCESSING_HEIGHT  # <= 1080
+        # Expected scale = min(835/1856, 1080/2304) = 835/1856 = 0.449892
+        assert ctx.processing_width == 835
+        assert ctx.processing_height == 1037
+        # Verify aspect ratio is strictly preserved (no distortion)
+        orig_ratio = 1856.0 / 2304.0
+        proc_ratio = float(ctx.processing_width) / float(ctx.processing_height)
+        assert abs(orig_ratio - proc_ratio) < 0.005
+        # Verify file exists on disk and is distinct from original
+        assert os.path.exists(ctx.processing_path)
+        assert ctx.processing_path != src_path
+
+    def test_landscape_image_proportionally_fits_within_835x1080(self, tmp_path):
+        # 2000 x 1000 px landscape
+        src_path = str(tmp_path / "landscape.png")
+        Image.new("RGB", (2000, 1000), color=(80, 140, 100)).save(src_path)
+
+        ctx = get_governance_processing_image(src_path)
+        assert ctx.is_downsampled is True
+        assert ctx.processing_width <= MAX_PROCESSING_WIDTH  # <= 835
+        assert ctx.processing_height <= MAX_PROCESSING_HEIGHT  # <= 1080
+        # Expected scale = min(835/2000, 1080/1000) = 835/2000 = 0.4175
+        assert ctx.processing_width == 835
+        assert ctx.processing_height == 418
+        # Aspect ratio preserved
+        assert abs((2000.0 / 1000.0) - (ctx.processing_width / ctx.processing_height)) < 0.005
+
+    def test_square_image_proportionally_fits_within_835x1080(self, tmp_path):
+        # 1600 x 1600 px square
+        src_path = str(tmp_path / "square.png")
+        Image.new("RGB", (1600, 1600), color=(120, 80, 160)).save(src_path)
+
+        ctx = get_governance_processing_image(src_path)
+        assert ctx.is_downsampled is True
+        assert ctx.processing_width <= MAX_PROCESSING_WIDTH  # <= 835
+        assert ctx.processing_height <= MAX_PROCESSING_HEIGHT  # <= 1080
+        # Expected scale = min(835/1600, 1080/1600) = 835/1600 = 0.521875
+        assert ctx.processing_width == 835
+        assert ctx.processing_height == 835
+        # Strict 1:1 square ratio preserved
+        assert ctx.processing_width == ctx.processing_height
+
+    def test_smaller_image_retains_original_dimensions_never_upscaled(self, tmp_path):
+        # 600 x 800 px (fits within 835 x 1080)
+        src_path = str(tmp_path / "smaller.png")
+        Image.new("RGB", (600, 800), color=(150, 100, 50)).save(src_path)
+
+        ctx = get_governance_processing_image(src_path)
+        assert ctx.is_downsampled is False
+        assert ctx.scale == 1.0
+        assert ctx.processing_width == 600
+        assert ctx.processing_height == 800
+        assert ctx.processing_path == src_path
+
+    def test_ocr_extraction_and_bbox_mapping_under_standardized_bounds(self, tmp_path):
+        src_path = str(tmp_path / "ocr_test.png")
+        img = Image.new("RGB", (1856, 2304), color=(255, 255, 255))
+        img.save(src_path)
+
+        ctx = get_governance_processing_image(src_path)
+        assert ctx.processing_width == 835
+        assert ctx.processing_height == 1037
+        scale = ctx.scale
+
+        # Mock OCR finding at processing resolution coordinates
+        proc_bbox = [[100.0, 200.0], [300.0, 200.0], [300.0, 250.0], [100.0, 250.0]]
+        # Rescale back to original image space
+        orig_bbox = [[float(c[0]) / scale, float(c[1]) / scale] for c in proc_bbox]
+
+        # Verify rescaled points correspond to original coordinates
+        assert round(orig_bbox[0][0]) == round(100.0 / scale)
+        assert round(orig_bbox[0][1]) == round(200.0 / scale)
+        assert orig_bbox[0][0] > proc_bbox[0][0]
+        assert orig_bbox[0][1] > proc_bbox[0][1]
+
+    def test_full_governance_lifecycle_runs_at_standardized_resolution(self, client, auth_tokens, tmp_path):
+        headers = auth_tokens["content_creator"]["headers"]
+        brand_res = client.get("/api/v1/brands", headers=headers)
+        brand_id = brand_res.json()[0]["id"]
+
+        # Create large test poster image (1800 x 2400)
+        img_path = str(tmp_path / "large_lifecycle_poster.png")
+        Image.new("RGB", (1800, 2400), color=(100, 150, 200)).save(img_path)
+
+        with open(img_path, "rb") as f:
+            up_res = client.post(
+                "/api/v1/content/upload-poster",
+                headers=headers,
+                files={"file": ("large_lifecycle_poster.png", f, "image/png")}
+            )
+        assert up_res.status_code == 200
+        up_path = up_res.json()["file_path"]
+
+        create_res = client.post(
+            "/api/v1/content",
+            headers=headers,
+            json={
+                "brand_id": brand_id,
+                "title": "Standardized Resolution Poster Test",
+                "channel": "Social Media",
+                "body_text": "100% pure organic orange juice.",
+                "poster_file_path": up_path
+            }
+        )
+        assert create_res.status_code == 200
+        v_id = create_res.json()["latest_version"]["id"]
+
+        gov_res = client.post(
+            "/api/v1/governance/run",
+            headers=headers,
+            json={"content_version_id": v_id}
+        )
+        assert gov_res.status_code == 200
+        data = gov_res.json()
+        assert data["overall_status"] is not None
+        assert "findings" in data
+        assert "findings_count" in data
+        assert data["findings_count"] >= 1
 
 

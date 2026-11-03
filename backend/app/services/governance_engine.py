@@ -76,9 +76,11 @@ class GovernanceEngine:
         """Check if a rule applies to the specified marketing channel."""
         if not rule_scope or rule_scope.strip().lower() == "all_channels":
             return True
+        if not content_channel or content_channel.strip().lower() in ["", "all_channels", "general", "none"]:
+            # If a rule requires a specific publishing destination (e.g. packaging, print_only),
+            # do not evaluate it as universally applicable when the destination is unknown.
+            return False
         norm_chan = self.normalize_channel(content_channel)
-        if norm_chan == "all_channels":
-            return True
         allowed_scopes = [s.strip().lower() for s in rule_scope.split(",") if s.strip()]
         if "all_channels" in allowed_scopes:
             return True

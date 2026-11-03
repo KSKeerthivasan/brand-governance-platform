@@ -11,8 +11,12 @@ logger = logging.getLogger(__name__)
 
 # System limits for advertisement image processing
 MAX_UPLOAD_SIZE_BYTES = 15 * 1024 * 1024  # 15 MB
-MAX_IMAGE_DIM = 4096  # 4096 px maximum dimension
-MAX_PROCESSING_DIM = 1400  # 1400 px longest edge for standardized safe image governance
+MAX_IMAGE_DIM = 4096  # 4096 px maximum upload dimension
+MAX_PROCESSING_WIDTH = 835  # 835 px maximum processing width
+MAX_PROCESSING_HEIGHT = 1080  # 1080 px maximum processing height
+MAX_PROCESSING_DIM = MAX_PROCESSING_HEIGHT  # 1080 px backwards-compatible alias
+RECOMMENDED_POSTER_WIDTH = 835
+RECOMMENDED_POSTER_HEIGHT = 1080
 ALLOWED_IMAGE_FORMATS = {"PNG", "JPEG", "WEBP"}
 ALLOWED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 
@@ -105,20 +109,25 @@ def compute_image_content_hash(file_path: str) -> str:
 
 def get_governance_processing_image(
     original_local_path: str,
-    max_dim: int = MAX_PROCESSING_DIM
+    max_width: int = MAX_PROCESSING_WIDTH,
+    max_height: int = MAX_PROCESSING_HEIGHT,
+    max_dim: Optional[int] = None,
 ) -> GovernanceImageContext:
     """
     Returns an optimized processing copy for governance operations (OCR, contrast, logo matching).
     - Preserves original image completely untouched in private storage.
-    - Standardizes longest edge to at most max_dim (1400 px).
+    - Standardizes dimensions to fit proportionally within max_width (835 px) and max_height (1080 px).
     - Never upscales smaller images.
-    - Preserves aspect ratio.
+    - Preserves aspect ratio at all times without stretching or distortion.
     - Uses high-quality LANCZOS downsampling.
     - Accounts for EXIF orientation.
     - Caches the processing copy alongside the local original keyed by content hash for instant reuse across runs.
     """
     if not os.path.exists(original_local_path):
         raise FileNotFoundError(f"Original image file not found on disk: {original_local_path}")
+
+    target_max_w = max_dim if max_dim is not None else max_width
+    target_max_h = max_dim if max_dim is not None else max_height
 
     # Inspect original dimensions with EXIF orientation
     try:
@@ -143,8 +152,8 @@ def get_governance_processing_image(
             original_mode="RGB"
         )
 
-    longest_edge = max(orig_w, orig_h)
-    if longest_edge <= max_dim:
+    # If image already fits within the configured maximums, do not downsample or upscale
+    if orig_w <= target_max_w and orig_h <= target_max_h:
         return GovernanceImageContext(
             original_path=original_local_path,
             processing_path=original_local_path,
@@ -158,8 +167,8 @@ def get_governance_processing_image(
             original_mode=orig_mode
         )
 
-    # Calculate proportional downscaled dimensions
-    scale = float(max_dim) / float(longest_edge)
+    # Calculate proportional downscaled dimensions fitting within target_max_w and target_max_h
+    scale = min(float(target_max_w) / float(orig_w), float(target_max_h) / float(orig_h))
     proc_w = max(1, int(round(orig_w * scale)))
     proc_h = max(1, int(round(orig_h * scale)))
 
@@ -169,18 +178,54 @@ def get_governance_processing_image(
     except Exception:
         content_hash = "nohash"
 
-    # Deterministic cache path in a .proc_cache subfolder keyed by content hash
+    # Deterministic cache path in a .proc_cache subfolder keyed by target bounds and content hash
     file_dir = os.path.dirname(original_local_path)
     base_name = os.path.basename(original_local_path)
     proc_cache_dir = os.path.join(file_dir, ".proc_cache")
-    proc_file_name = f"proc_{max_dim}_{proc_w}x{proc_h}_{content_hash}_{base_name}.png"
+    proc_file_name = f"proc_{target_max_w}x{target_max_h}_{proc_w}x{proc_h}_{content_hash}_{base_name}.png"
     proc_path = os.path.join(proc_cache_dir, proc_file_name)
 
-    # Check if previously generated processing derivative exists
-    if os.path.exists(proc_path) and os.path.getsize(proc_path) > 0:
+    # Check if previously generated processing derivative exists in local cache or fallback temp cache
+    fallback_cache_dir = os.path.join(os.environ.get("TMPDIR", "/tmp"), "inkloom_proc_cache")
+    fallback_proc_path = os.path.join(fallback_cache_dir, proc_file_name)
+
+    for p in (proc_path, fallback_proc_path):
+        if os.path.exists(p) and os.path.getsize(p) > 0:
+            return GovernanceImageContext(
+                original_path=original_local_path,
+                processing_path=p,
+                original_width=orig_w,
+                original_height=orig_h,
+                processing_width=proc_w,
+                processing_height=proc_h,
+                scale=scale,
+                is_downsampled=True,
+                original_format=orig_format,
+                original_mode=orig_mode
+            )
+
+    # Generate the standardized processing copy
+    try:
+        try:
+            os.makedirs(proc_cache_dir, exist_ok=True)
+            target_path = proc_path
+        except OSError:
+            # Fallback to system temp directory if source directory is read-only
+            os.makedirs(fallback_cache_dir, exist_ok=True)
+            target_path = fallback_proc_path
+
+        with Image.open(original_local_path) as orig_img:
+            transposed = ImageOps.exif_transpose(orig_img)
+            resized = transposed.resize((proc_w, proc_h), Image.Resampling.LANCZOS)
+            tmp_proc = f"{target_path}.tmp_{os.getpid()}"
+            resized.save(tmp_proc, format="PNG", optimize=True)
+            os.replace(tmp_proc, target_path)
+            del resized, transposed
+            gc.collect()
+
         return GovernanceImageContext(
             original_path=original_local_path,
-            processing_path=proc_path,
+            processing_path=target_path,
             original_width=orig_w,
             original_height=orig_h,
             processing_width=proc_w,
@@ -190,18 +235,6 @@ def get_governance_processing_image(
             original_format=orig_format,
             original_mode=orig_mode
         )
-
-    # Generate the standardized processing copy
-    try:
-        os.makedirs(proc_cache_dir, exist_ok=True)
-        with Image.open(original_local_path) as orig_img:
-            transposed = ImageOps.exif_transpose(orig_img)
-            resized = transposed.resize((proc_w, proc_h), Image.Resampling.LANCZOS)
-            tmp_proc = f"{proc_path}.tmp_{os.getpid()}"
-            resized.save(tmp_proc, format="PNG", optimize=True)
-            os.replace(tmp_proc, proc_path)
-            del resized, transposed
-            gc.collect()
     except Exception as e:
         logger.warning(
             f"Failed to create cached processing copy at {proc_path}: {e}. Falling back to original path."

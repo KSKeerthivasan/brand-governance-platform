@@ -9,7 +9,6 @@ for explicit contradictions between extracted values/metadata and source text.
 
 import re
 from typing import List, Dict, Any, Tuple, Optional
-from pypdf import PdfReader
 
 
 def extract_pdf_pages(file_path: str) -> List[str]:
@@ -18,6 +17,7 @@ def extract_pdf_pages(file_path: str) -> List[str]:
     Returns a list of strings where index 0 is Page 1.
     """
     try:
+        from pypdf import PdfReader
         with open(file_path, "rb") as f:
             reader = PdfReader(f)
             pages = []

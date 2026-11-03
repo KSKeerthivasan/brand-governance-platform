@@ -3,9 +3,7 @@ import re
 import hashlib
 from datetime import datetime, date, timedelta
 from typing import List, Dict, Any, Optional, Tuple
-import openpyxl
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.utils import get_column_letter
+# openpyxl imported lazily within workbook operations to reduce container memory footprint
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
@@ -90,6 +88,9 @@ class ExcelImportService:
     # -------------------------------------------------------------------------
 
     def generate_template(self, template_type: str) -> bytes:
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from openpyxl.utils import get_column_letter
         wb = openpyxl.Workbook()
         wb.remove(wb.active)  # Remove default blank sheet
 
@@ -411,7 +412,7 @@ class ExcelImportService:
     # 2. STAGING & VALIDATION (PREVIEW ONLY - ZERO ACTIVE RECORD MUTATION)
     # -------------------------------------------------------------------------
 
-    def _check_hidden_and_merged(self, ws: openpyxl.worksheet.worksheet.Worksheet, sheet_display_name: str) -> List[str]:
+    def _check_hidden_and_merged(self, ws: Any, sheet_display_name: str) -> List[str]:
         errors = []
         if ws.sheet_state != "visible":
             errors.append(f"[{sheet_display_name}] Worksheet is hidden (state='{ws.sheet_state}'). Hidden worksheets are strictly rejected to prevent accidental data extraction.")
@@ -539,6 +540,7 @@ class ExcelImportService:
         db.flush()
 
         try:
+            import openpyxl
             wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=False)
         except Exception as e:
             staged_import.status = "failed"
@@ -565,7 +567,7 @@ class ExcelImportService:
         db: Session,
         org_id: str,
         staged_import: StagedImport,
-        wb: openpyxl.Workbook
+        wb: Any
     ):
         target_sheet_name = None
         for name in wb.sheetnames:
@@ -784,7 +786,7 @@ class ExcelImportService:
         db: Session,
         org_id: str,
         staged_import: StagedImport,
-        wb: openpyxl.Workbook
+        wb: Any
     ):
         claims_sheet_name = None
         for name in wb.sheetnames:

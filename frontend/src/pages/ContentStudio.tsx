@@ -28,8 +28,11 @@ import {
 import { api } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { StatusBadge } from '../components/StatusBadge';
+import { GovernanceReviewPanel } from '../components/GovernanceReviewPanel';
 import { ContentItem, ContentVersion, GovernanceRun, Brand, BrandAsset, CorrectionSuggestion } from '../types';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
+
+export type ContentType = 'image' | 'text' | 'both';
 
 export const ContentStudio: React.FC = () => {
   const { role } = useAuth();
@@ -40,9 +43,10 @@ export const ContentStudio: React.FC = () => {
   const [versions, setVersions] = useState<ContentVersion[]>([]);
   const [latestGovRun, setLatestGovRun] = useState<GovernanceRun | null>(null);
 
-  // Form Editor State
+  // Content Type & Form Editor State
+  const [contentType, setContentType] = useState<ContentType>('both');
   const [title, setTitle] = useState('');
-  const [channel, setChannel] = useState('Social Media');
+  const [channel, setChannel] = useState('General');
   const [bodyText, setBodyText] = useState('');
   const [selectedBrandId, setSelectedBrandId] = useState('');
 
@@ -228,8 +232,21 @@ export const ContentStudio: React.FC = () => {
     setGovError(null);
     setIsDirty(false);
 
-    // Restore poster details from version
+    // Determine content type from version details
     const ver = item.latest_version;
+    const hasPoster = Boolean(ver && ver.poster_file_path);
+    const hasText = Boolean(ver && ver.body_text && ver.body_text.trim().length > 0);
+    if (hasPoster && hasText) {
+      setContentType('both');
+    } else if (hasPoster && !hasText) {
+      setContentType('image');
+    } else if (!hasPoster && hasText) {
+      setContentType('text');
+    } else {
+      setContentType('both');
+    }
+
+    // Restore poster details from version
     if (ver && ver.poster_file_path) {
       setPosterFilePath(ver.poster_file_path);
       setPosterAssetId(ver.poster_asset_id || null);
@@ -308,7 +325,8 @@ export const ContentStudio: React.FC = () => {
   const handleCreateNewDraft = () => {
     setSelectedContent(null);
     setTitle('New Campaign Draft');
-    setChannel('Social Media');
+    setContentType('both');
+    setChannel('General');
     setBodyText('');
     setSuggestions({});
     setSuggestionBanner(null);
@@ -423,9 +441,8 @@ export const ContentStudio: React.FC = () => {
 
   const saveDraftInternal = async (): Promise<ContentItem | null> => {
     const trimmedTitle = title.trim();
-    const trimmedBody = bodyText.trim();
-    if (!trimmedTitle || !trimmedBody) {
-      alert('Please provide title and content text before saving or running checks.');
+    if (!trimmedTitle) {
+      alert('Please provide a title before saving or running checks.');
       return null;
     }
     const brandIdToUse = selectedBrandId || (brands.length > 0 ? brands[0].id : '');
@@ -434,29 +451,64 @@ export const ContentStudio: React.FC = () => {
       return null;
     }
 
+    const trimmedBody = bodyText.trim();
+    const hasPoster = Boolean(posterFilePath);
+
+    if (contentType === 'image') {
+      if (!hasPoster) {
+        alert('Please upload an advertisement image for an Image Advertisement.');
+        return null;
+      }
+    } else if (contentType === 'text') {
+      if (!trimmedBody) {
+        alert('Please provide marketing copy text for a Text Advertisement.');
+        return null;
+      }
+    } else {
+      // 'both'
+      if (!trimmedBody && !hasPoster) {
+        alert('Please provide marketing copy and upload an advertisement image for an Image + Text Advertisement.');
+        return null;
+      }
+      if (!trimmedBody) {
+        alert('Please provide marketing copy text for an Image + Text Advertisement.');
+        return null;
+      }
+      if (!hasPoster) {
+        alert('Please upload an advertisement image for an Image + Text Advertisement.');
+        return null;
+      }
+    }
+
+    const bodyToSave = contentType === 'image' ? '' : trimmedBody;
+    const posterPathToSave = contentType === 'text' ? undefined : (posterFilePath || undefined);
+    const posterAssetIdToSave = contentType === 'text' ? undefined : (posterAssetId || undefined);
+    const posterAltToSave = contentType === 'text' ? undefined : (posterAltText ? posterAltText.trim() : undefined);
+    const channelToSave = channel || 'General';
+
     setSaving(true);
     try {
       let savedItem: ContentItem;
       if (selectedContent) {
         savedItem = await api.updateContentItem(
           selectedContent.id,
-          trimmedBody,
+          bodyToSave,
           trimmedTitle,
-          channel,
-          posterFilePath || undefined,
-          posterAssetId || undefined,
-          posterAltText ? posterAltText.trim() : undefined,
+          channelToSave,
+          posterPathToSave,
+          posterAssetIdToSave,
+          posterAltToSave,
           selectedProductId || undefined
         );
       } else {
         savedItem = await api.createContentItem(
           brandIdToUse,
           trimmedTitle,
-          channel,
-          trimmedBody,
-          posterFilePath || undefined,
-          posterAssetId || undefined,
-          posterAltText ? posterAltText.trim() : undefined,
+          channelToSave,
+          bodyToSave,
+          posterPathToSave,
+          posterAssetIdToSave,
+          posterAltToSave,
           selectedProductId || undefined
         );
       }
@@ -464,10 +516,12 @@ export const ContentStudio: React.FC = () => {
       // Synchronize editor state with the exact persisted version
       setSelectedContent(savedItem);
       setTitle(savedItem.title);
-      setChannel(savedItem.channel);
+      setChannel(savedItem.channel || 'General');
       setSelectedBrandId(savedItem.brand_id);
       setSelectedProductId(savedItem.product_id || '');
-      setBodyText(savedItem.latest_version?.body_text || '');
+      if (contentType !== 'image') {
+        setBodyText(savedItem.latest_version?.body_text || '');
+      }
 
       const ver = savedItem.latest_version;
       if (ver && ver.poster_file_path) {
@@ -692,12 +746,16 @@ export const ContentStudio: React.FC = () => {
   const filteredDrafts = useMemo(() => {
     if (!draftSearchQuery.trim()) return contentList;
     const q = draftSearchQuery.toLowerCase();
-    return contentList.filter(c =>
-      c.title.toLowerCase().includes(q) ||
-      c.channel.toLowerCase().includes(q) ||
-      c.status.toLowerCase().includes(q)
-    );
-  }, [contentList, draftSearchQuery]);
+    return contentList.filter(c => {
+      const brand = brands.find(b => b.id === c.brand_id);
+      return (
+        c.title.toLowerCase().includes(q) ||
+        (brand && brand.name.toLowerCase().includes(q)) ||
+        c.channel.toLowerCase().includes(q) ||
+        c.status.toLowerCase().includes(q)
+      );
+    });
+  }, [contentList, draftSearchQuery, brands]);
 
   return (
     <div>
@@ -716,11 +774,21 @@ export const ContentStudio: React.FC = () => {
         }
         .config-grid {
           display: grid;
-          grid-template-columns: 1.1fr 2fr 1.1fr;
+          grid-template-columns: 1fr 1fr;
           gap: 14px;
         }
         @media (max-width: 768px) {
           .config-grid {
+            grid-template-columns: 1fr;
+          }
+        }
+        .content-type-selector {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 10px;
+        }
+        @media (max-width: 640px) {
+          .content-type-selector {
             grid-template-columns: 1fr;
           }
         }
@@ -809,7 +877,7 @@ export const ContentStudio: React.FC = () => {
                   ) : (
                     contentList.map((item) => (
                       <option key={item.id} value={item.id}>
-                        {item.title} (v{item.current_version_num} • {item.channel})
+                        {item.title} (v{item.current_version_num})
                       </option>
                     ))
                   )}
@@ -873,72 +941,134 @@ export const ContentStudio: React.FC = () => {
             </div>
           </div>
 
-          {/* B. CONTENT CONFIGURATION GRID (Brand, Target Product, Target Channel) */}
-          <div className="config-grid">
-            {/* Brand */}
+          {/* B. CONTENT TYPE & CONFIGURATION */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {/* Content Type Selector */}
             <div>
-              <label className="form-label" style={{ marginBottom: 6, display: 'block' }}>Brand</label>
-              <select
-                value={selectedBrandId}
-                onChange={(e) => {
-                  setSelectedBrandId(e.target.value);
-                  setIsDirty(true);
-                }}
-                className="select"
-                style={{ height: 40, fontSize: '0.82rem', padding: '6px 10px', background: '#0b111e' }}
-              >
-                {brands.length === 0 ? (
-                  <option value="">Default Brand</option>
-                ) : (
-                  brands.map((b) => (
-                    <option key={b.id} value={b.id}>{b.name}</option>
-                  ))
-                )}
-              </select>
+              <label className="form-label" style={{ marginBottom: 6, display: 'block' }}>Content Type</label>
+              <div className="content-type-selector">
+                <button
+                  type="button"
+                  data-testid="content-type-image"
+                  onClick={() => { setContentType('image'); setIsDirty(true); }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                    padding: '10px 14px',
+                    borderRadius: 8,
+                    border: contentType === 'image' ? '1.5px solid #818cf8' : '1px solid var(--border-subtle)',
+                    background: contentType === 'image' ? 'rgba(99, 102, 241, 0.15)' : 'rgba(255, 255, 255, 0.02)',
+                    color: contentType === 'image' ? '#c7d2fe' : 'var(--text-muted)',
+                    fontWeight: contentType === 'image' ? 600 : 500,
+                    fontSize: '0.82rem',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  <ImageIcon size={16} color={contentType === 'image' ? '#818cf8' : 'currentColor'} />
+                  Image Advertisement
+                </button>
+                <button
+                  type="button"
+                  data-testid="content-type-text"
+                  onClick={() => { setContentType('text'); setIsDirty(true); }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                    padding: '10px 14px',
+                    borderRadius: 8,
+                    border: contentType === 'text' ? '1.5px solid #818cf8' : '1px solid var(--border-subtle)',
+                    background: contentType === 'text' ? 'rgba(99, 102, 241, 0.15)' : 'rgba(255, 255, 255, 0.02)',
+                    color: contentType === 'text' ? '#c7d2fe' : 'var(--text-muted)',
+                    fontWeight: contentType === 'text' ? 600 : 500,
+                    fontSize: '0.82rem',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  <FileText size={16} color={contentType === 'text' ? '#818cf8' : 'currentColor'} />
+                  Text Advertisement
+                </button>
+                <button
+                  type="button"
+                  data-testid="content-type-both"
+                  onClick={() => { setContentType('both'); setIsDirty(true); }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                    padding: '10px 14px',
+                    borderRadius: 8,
+                    border: contentType === 'both' ? '1.5px solid #818cf8' : '1px solid var(--border-subtle)',
+                    background: contentType === 'both' ? 'rgba(99, 102, 241, 0.15)' : 'rgba(255, 255, 255, 0.02)',
+                    color: contentType === 'both' ? '#c7d2fe' : 'var(--text-muted)',
+                    fontWeight: contentType === 'both' ? 600 : 500,
+                    fontSize: '0.82rem',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  <Layers size={16} color={contentType === 'both' ? '#818cf8' : 'currentColor'} />
+                  Image + Text Advertisement
+                </button>
+              </div>
             </div>
 
-            {/* Target Product (Catalogue) — Wide container to prevent name clipping */}
-            <div>
-              <label className="form-label" style={{ marginBottom: 6, display: 'block' }}>Target Product</label>
-              <select
-                value={selectedProductId}
-                onChange={(e) => {
-                  setSelectedProductId(e.target.value);
-                  setIsDirty(true);
-                }}
-                className="select"
-                style={{ height: 40, fontSize: '0.82rem', padding: '6px 10px', background: '#0b111e' }}
-              >
-                <option value="">General / All Catalogue Products</option>
-                {products.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.product_name} {p.sku ? `(${p.sku})` : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {/* Brand and Target Product Grid (2 columns) */}
+            <div className="config-grid">
+              {/* Brand */}
+              <div>
+                <label className="form-label" style={{ marginBottom: 6, display: 'block' }}>Brand</label>
+                <select
+                  value={selectedBrandId}
+                  onChange={(e) => {
+                    setSelectedBrandId(e.target.value);
+                    setIsDirty(true);
+                  }}
+                  className="select"
+                  style={{ height: 40, fontSize: '0.82rem', padding: '6px 10px', background: '#0b111e' }}
+                >
+                  {brands.length === 0 ? (
+                    <option value="">Default Brand</option>
+                  ) : (
+                    brands.map((b) => (
+                      <option key={b.id} value={b.id}>{b.name}</option>
+                    ))
+                  )}
+                </select>
+              </div>
 
-            {/* Target Channel */}
-            <div>
-              <label className="form-label" style={{ marginBottom: 6, display: 'block' }}>Target Channel</label>
-              <select
-                value={channel}
-                onChange={(e) => {
-                  setChannel(e.target.value);
-                  setIsDirty(true);
-                }}
-                className="select"
-                style={{ height: 40, fontSize: '0.82rem', padding: '6px 10px', background: '#0b111e' }}
-              >
-                <option value="Instagram Post">Instagram Post (1:1)</option>
-                <option value="Instagram Story">Instagram Story (9:16)</option>
-                <option value="Social Media">Social Media (General)</option>
-                <option value="Website Banner">Website Banner (16:9)</option>
-                <option value="Print Ad">Print Ad (CMYK)</option>
-              </select>
+              {/* Target Product (Catalogue) */}
+              <div>
+                <label className="form-label" style={{ marginBottom: 6, display: 'block' }}>Target Product</label>
+                <select
+                  value={selectedProductId}
+                  onChange={(e) => {
+                    setSelectedProductId(e.target.value);
+                    setIsDirty(true);
+                  }}
+                  className="select"
+                  style={{ height: 40, fontSize: '0.82rem', padding: '6px 10px', background: '#0b111e' }}
+                >
+                  <option value="">General / All Catalogue Products</option>
+                  {products.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.product_name} {p.sku ? `(${p.sku})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
 
+          {/* C & D. MARKETING COPY EDITOR (Visible for Text and Image + Text) */}
+          {(contentType === 'text' || contentType === 'both') && (
+            <>
           {/* C. MARKETING COPY EDITOR */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <div className="flex-between">
@@ -1121,7 +1251,11 @@ export const ContentStudio: React.FC = () => {
             )}
           </div>
 
-          {/* E. ADVERTISEMENT CREATIVE POSTER */}
+            </>
+          )}
+
+          {/* E. ADVERTISEMENT CREATIVE POSTER (Visible for Image and Image + Text) */}
+          {(contentType === 'image' || contentType === 'both') && (
           <div style={{
             padding: 16,
             borderRadius: 10,
@@ -1176,6 +1310,40 @@ export const ContentStudio: React.FC = () => {
                     accept="image/png,image/jpeg,image/webp"
                     style={{ display: 'none' }}
                   />
+                </div>
+
+                {/* User-Facing Poster Size Recommendation & Infrastructure Notice */}
+                <div style={{
+                  padding: '12px 14px',
+                  borderRadius: 8,
+                  background: 'rgba(99, 102, 241, 0.05)',
+                  border: '1px solid rgba(99, 102, 241, 0.16)',
+                  fontSize: '0.76rem',
+                  lineHeight: 1.5,
+                  textAlign: 'left',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 6
+                }}>
+                  <div style={{ fontWeight: 600, color: '#c7d2fe', display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.80rem' }}>
+                    <Info size={15} color="#818cf8" style={{ flexShrink: 0 }} />
+                    Recommended Poster Size: 835 × 1080 px
+                  </div>
+                  <div style={{ color: '#cbd5e1' }}>
+                    For the best balance of image clarity and reliable processing, we recommend uploading posters at 835 × 1080 pixels.
+                  </div>
+                  <div style={{ color: '#94a3b8', fontSize: '0.73rem' }}>
+                    Other dimensions are accepted, but larger images will be proportionally resized before analysis.
+                  </div>
+                  <div style={{
+                    fontSize: '0.71rem',
+                    color: '#94a3b8',
+                    borderTop: '1px solid rgba(255,255,255,0.06)',
+                    paddingTop: 6,
+                    marginTop: 2
+                  }}>
+                    Why this size limit? Inkloom AI currently operates on Render&apos;s free-tier hosting, which has limited memory resources. We use optimized image dimensions to reduce memory consumption and help maintain reliable poster analysis. This restriction is intended to keep the service stable without requiring paid infrastructure.
+                  </div>
                 </div>
 
                 {assets.length > 0 && (
@@ -1252,6 +1420,32 @@ export const ContentStudio: React.FC = () => {
                   </div>
                 )}
 
+                {/* Oversized Poster Informational Warning */}
+                {!isPdf && posterMeta?.width && posterMeta?.height && (posterMeta.width > 835 || posterMeta.height > 1080) && (
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 10,
+                    padding: '10px 14px',
+                    borderRadius: 8,
+                    background: 'rgba(99, 102, 241, 0.08)',
+                    border: '1px solid rgba(99, 102, 241, 0.25)',
+                    color: '#cbd5e1',
+                    fontSize: '0.78rem',
+                    lineHeight: 1.5
+                  }}>
+                    <Info size={16} color="#818cf8" style={{ flexShrink: 0, marginTop: 2 }} />
+                    <div>
+                      <div style={{ fontWeight: 600, color: '#e0e7ff', marginBottom: 2 }}>
+                        Image Resized for Analysis
+                      </div>
+                      <div>
+                        Your image exceeds the recommended processing dimensions of 835 × 1080 px. Inkloom AI will automatically resize it proportionally before analysis. Your original image will remain unchanged.
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* Poster Preview and Info Row */}
                 <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
                   {posterPreviewUrl ? (
@@ -1314,7 +1508,12 @@ export const ContentStudio: React.FC = () => {
                     )}
                     {!isPdf && posterMeta?.width && posterMeta?.height && (
                       <div>
-                        Resolution: <strong>{posterMeta.width}x{posterMeta.height}px</strong> ({posterMeta.color_mode || 'RGB'})
+                        Original Resolution: <strong>{posterMeta.width}x{posterMeta.height}px</strong> ({posterMeta.color_mode || 'RGB'})
+                        {(posterMeta.width > 835 || posterMeta.height > 1080) && (
+                          <span style={{ marginLeft: 6, color: '#818cf8', fontSize: '0.72rem' }}>
+                            (governance analyzed within 835×1080 bounds)
+                          </span>
+                        )}
                       </div>
                     )}
                     <div style={{ fontSize: '0.74rem', color: '#34d399', marginTop: 2 }}>
@@ -1348,6 +1547,8 @@ export const ContentStudio: React.FC = () => {
               </div>
             )}
           </div>
+
+          )}
 
           {/* 4. ACTION BUTTONS (Positioned consistently at bottom of Content Editor) */}
           <div className="action-bar-container">
@@ -1411,679 +1612,26 @@ export const ContentStudio: React.FC = () => {
           boxSizing: 'border-box',
           overflow: 'visible'
         }}>
-          {/* Header with clear top alignment, zero clipping, and prominent labelling */}
-          <div className="flex-between" style={{ alignItems: 'flex-start', minHeight: 48, paddingTop: 2 }}>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Sparkles size={18} color="#818cf8" style={{ flexShrink: 0 }} />
-                <h2 className="title-md" style={{ margin: 0, lineHeight: 1.4, fontSize: '1.05rem', color: '#f8fafc' }}>
-                  Authoritative Unified Governance
-                </h2>
-              </div>
-              <div style={{ fontSize: '0.74rem', color: 'var(--text-dim)', marginTop: 4 }}>
-                {latestGovRun && checkedVersionNum ? (
-                  <>
-                    Official evaluation on <strong>Version {checkedVersionNum}</strong>
-                    {checkedVersionId && <span style={{ fontFamily: 'monospace', marginLeft: 4 }}>({checkedVersionId.slice(0, 8)})</span>}
-                  </>
-                ) : (
-                  'Official evaluation against active Knowledge Base and creative assets'
-                )}
-              </div>
-            </div>
-            {latestGovRun && (
-              <span
-                className={`badge badge-${latestGovRun.overall_status === 'passed' ? 'success' : (latestGovRun.overall_status === 'warnings' ? 'warning' : 'danger')}`}
-                style={{ textTransform: 'uppercase', letterSpacing: '0.04em' }}
-              >
-                {latestGovRun.overall_status.toUpperCase()}
-              </span>
-            )}
-          </div>
-
-          {/* Actionable Error Banner if check failed */}
-          {govError && (
-            <div style={{
-              padding: '12px 14px',
-              borderRadius: 8,
-              background: 'rgba(239, 68, 68, 0.12)',
-              border: '1px solid rgba(239, 68, 68, 0.4)',
-              color: '#fca5a5',
-              fontSize: '0.78rem',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 8
-            }}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                <XCircle size={16} color="#f87171" style={{ flexShrink: 0, marginTop: 2 }} />
-                <div style={{ flex: 1 }}>
-                  <strong style={{ color: '#fecaca', display: 'block', marginBottom: 2 }}>Governance Execution Error</strong>
-                  <span style={{ lineHeight: 1.4 }}>{govError}</span>
-                </div>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 2 }}>
-                <button
-                  type="button"
-                  onClick={handleRunChecks}
-                  disabled={checking}
-                  className="btn btn-secondary"
-                  style={{
-                    padding: '4px 10px',
-                    fontSize: '0.72rem',
-                    background: 'rgba(239, 68, 68, 0.2)',
-                    borderColor: 'rgba(239, 68, 68, 0.5)',
-                    color: '#fef2f2',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6
-                  }}
-                >
-                  <Play size={12} /> {checking ? 'Retrying...' : 'Retry Governance Check'}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Stale Findings / Unsaved Changes Warning Banner */}
-          {latestGovRun && isDirty && (
-            <div
-              id="content-modified-banner"
-              style={{
-                padding: '10px 12px',
-                borderRadius: 8,
-                background: 'rgba(245, 158, 11, 0.12)',
-                border: '1px solid rgba(245, 158, 11, 0.4)',
-                color: '#fcd34d',
-                fontSize: '0.78rem',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8
-              }}
-            >
-              <AlertTriangle size={16} color="#fbbf24" style={{ flexShrink: 0 }} />
-              <div>
-                <strong>Content Modified:</strong> The editor has unsaved changes. Findings below belong to <strong>v{checkedVersionNum}</strong>. Run Governance Checks to evaluate the current revision.
-              </div>
-            </div>
-          )}
-
-          {/* Multi-Page PDF Analysis vs Compliance Distinction Banner */}
-          {isPdf && latestGovRun && (
-            (() => {
-              const pagesWithIssues = new Set(
-                allFindings
-                  .filter(f => f.page_number !== null && f.page_number !== undefined && f.status !== 'passed_check')
-                  .map(f => f.page_number)
-              );
-              const hasBlockers = allFindings.some(f => f.severity === 'critical' && f.status !== 'passed_check');
-              const hasWarnings = allFindings.some(f => f.severity === 'warning' && f.status !== 'passed_check');
-              const allCompliant = pagesWithIssues.size === 0 && !hasBlockers && !hasWarnings;
-
-              return (
-                <div style={{
-                  padding: '10px 12px',
-                  borderRadius: 8,
-                  background: allCompliant ? 'rgba(16, 185, 129, 0.12)' : 'rgba(99, 102, 241, 0.12)',
-                  border: `1px solid ${allCompliant ? 'rgba(16, 185, 129, 0.4)' : 'rgba(99, 102, 241, 0.4)'}`,
-                  fontSize: '0.78rem'
-                }}>
-                  <div style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6, color: allCompliant ? '#34d399' : '#a5b4fc', marginBottom: 3 }}>
-                    {allCompliant ? <CheckCircle size={15} /> : <AlertTriangle size={15} />}
-                    {allCompliant
-                      ? `All ${pdfPageCount} Pages Analysed & Compliant`
-                      : `All ${pdfPageCount} Pages Analysed (${pagesWithIssues.size} With Findings)`}
-                  </div>
-                  <div style={{ color: 'var(--text-dim)', fontSize: '0.72rem', lineHeight: 1.3 }}>
-                    {allCompliant
-                      ? 'Every page in this PDF creative conforms to brand specifications and fact checks.'
-                      : 'Note: "All pages analysed" does not equal "All pages compliant". Inspect individual page findings below.'}
-                  </div>
-                </div>
-              );
-            })()
-          )}
-
-          {/* Multi-Page PDF Page-Level Finding Filter Selector */}
-          {isPdf && latestGovRun && pdfPageCount > 0 && (
-            <div>
-              <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', marginBottom: 6 }}>
-                Filter By PDF Page / Caption
-              </div>
-              <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-                <button
-                  type="button"
-                  onClick={() => setPageFilter('all')}
-                  style={{
-                    padding: '3px 8px',
-                    borderRadius: 4,
-                    border: pageFilter === 'all' ? '1px solid #6366f1' : '1px solid rgba(255,255,255,0.1)',
-                    background: pageFilter === 'all' ? '#4f46e5' : 'rgba(255,255,255,0.04)',
-                    color: '#fff',
-                    fontSize: '0.72rem',
-                    fontWeight: 600,
-                    cursor: 'pointer'
-                  }}
-                >
-                  All Pages ({allFindings.length})
-                </button>
-                {Array.from({ length: pdfPageCount }, (_, i) => i + 1).map((p) => {
-                  const pFindings = allFindings.filter(f => f.page_number === p);
-                  const pIssues = pFindings.filter(f => f.status !== 'passed_check');
-                  const hasCrit = pIssues.some(f => f.severity === 'critical');
-                  const hasWarn = pIssues.some(f => f.severity === 'warning');
-                  const isCur = pageFilter === p;
-                  const dotColor = hasCrit ? '#fb7185' : (hasWarn ? '#fbbf24' : (pFindings.length > 0 ? '#34d399' : '#94a3b8'));
-
-                  return (
-                    <button
-                      key={p}
-                      type="button"
-                      onClick={() => {
-                        setPageFilter(p);
-                        setSelectedPage(p);
-                      }}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 4,
-                        padding: '3px 8px',
-                        borderRadius: 4,
-                        border: isCur ? '1px solid #6366f1' : '1px solid rgba(255,255,255,0.1)',
-                        background: isCur ? '#4f46e5' : 'rgba(255,255,255,0.04)',
-                        color: isCur ? '#fff' : 'var(--text-muted)',
-                        fontSize: '0.72rem',
-                        fontWeight: 700,
-                        cursor: 'pointer'
-                      }}
-                    >
-                      <span style={{ width: 6, height: 6, borderRadius: '50%', background: dotColor }} />
-                      Pg {p} ({pFindings.length})
-                    </button>
-                  );
-                })}
-                <button
-                  type="button"
-                  onClick={() => setPageFilter('caption')}
-                  style={{
-                    padding: '3px 8px',
-                    borderRadius: 4,
-                    border: pageFilter === 'caption' ? '1px solid #6366f1' : '1px solid rgba(255,255,255,0.1)',
-                    background: pageFilter === 'caption' ? '#4f46e5' : 'rgba(255,255,255,0.04)',
-                    color: '#fff',
-                    fontSize: '0.72rem',
-                    fontWeight: 600,
-                    cursor: 'pointer'
-                  }}
-                >
-                  Caption ({allFindings.filter(f => f.page_number === null || f.page_number === undefined).length})
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Suggestion Feedback Banner */}
-          {suggestionBanner && (
-            <div style={{
-              padding: '8px 12px',
-              borderRadius: 6,
-              fontSize: '0.75rem',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              background: suggestionBanner.type === 'success'
-                ? 'rgba(16, 185, 129, 0.15)'
-                : (suggestionBanner.type === 'error' ? 'rgba(244, 63, 94, 0.15)' : 'rgba(56, 189, 248, 0.15)'),
-              border: `1px solid ${suggestionBanner.type === 'success' ? '#10b981' : (suggestionBanner.type === 'error' ? '#f43f5e' : '#38bdf8')}`,
-              color: '#fff'
-            }}>
-              {suggestionBanner.type === 'success' && <CheckCircle size={14} color="#34d399" />}
-              {suggestionBanner.type === 'error' && <XCircle size={14} color="#fb7185" />}
-              {suggestionBanner.type === 'info' && <Info size={14} color="#38bdf8" />}
-              <span style={{ flex: 1 }}>{suggestionBanner.text}</span>
-              <button
-                type="button"
-                onClick={() => setSuggestionBanner(null)}
-                style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: 0 }}
-              >
-                ✕
-              </button>
-            </div>
-          )}
-
-          {/* Findings Filter Tabs */}
-          {latestGovRun && (
-            <div style={{ display: 'flex', gap: 6 }}>
-              <button
-                type="button"
-                onClick={() => setFindingsFilter('all')}
-                style={{
-                  flex: 1,
-                  padding: '6px 10px',
-                  borderRadius: 6,
-                  border: 'none',
-                  fontSize: '0.74rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  background: findingsFilter === 'all' ? '#4f46e5' : 'rgba(255,255,255,0.05)',
-                  color: '#fff'
-                }}
-              >
-                All ({pageFilteredFindings.length})
-              </button>
-              <button
-                type="button"
-                onClick={() => setFindingsFilter('text')}
-                style={{
-                  flex: 1,
-                  padding: '6px 10px',
-                  borderRadius: 6,
-                  border: 'none',
-                  fontSize: '0.74rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  background: findingsFilter === 'text' ? '#4f46e5' : 'rgba(255,255,255,0.05)',
-                  color: '#fff'
-                }}
-              >
-                Text ({textFindings.length})
-              </button>
-              <button
-                type="button"
-                onClick={() => setFindingsFilter('visual')}
-                style={{
-                  flex: 1,
-                  padding: '6px 10px',
-                  borderRadius: 6,
-                  border: 'none',
-                  fontSize: '0.74rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  background: findingsFilter === 'visual' ? '#4f46e5' : 'rgba(255,255,255,0.05)',
-                  color: '#fff'
-                }}
-              >
-                Visual ({visualFindings.length})
-              </button>
-            </div>
-          )}
-
-          {/* Findings List or Empty State */}
-          {!latestGovRun ? (
-            <div style={{ textAlign: 'center', padding: '48px 16px', color: 'var(--text-dim)', background: 'rgba(0,0,0,0.15)', borderRadius: 8, border: '1px dashed var(--border-subtle)' }}>
-              <ShieldAlert size={36} style={{ margin: '0 auto 10px auto', opacity: 0.5 }} />
-              <div style={{ fontWeight: 600, fontSize: '0.9rem', color: '#e2e8f0' }}>No Governance Check Executed</div>
-              <div style={{ fontSize: '0.78rem', marginTop: 4, maxWidth: 300, margin: '4px auto 0' }}>
-                Click "Run Governance Check" to evaluate marketing copy and attached creative against approved brand guidelines and specifications.
-              </div>
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {displayedFindings.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '28px 10px', background: 'rgba(16,185,129,0.08)', borderRadius: 8, border: '1px solid rgba(16,185,129,0.2)' }}>
-                  <CheckCircle size={28} color="#34d399" style={{ margin: '0 auto 6px auto' }} />
-                  <div style={{ fontWeight: 700, color: '#34d399', fontSize: '0.88rem' }}>No Issues in this Category</div>
-                  <div style={{ fontSize: '0.74rem', color: 'var(--text-dim)', marginTop: 2 }}>
-                    Content conforms to checked brand requirements.
-                  </div>
-                </div>
-              ) : (
-                displayedFindings.map((f, idx) => {
-                  const isPass = f.status === 'passed_check';
-                  const isUnable = f.status === 'unable_to_verify';
-
-                  const borderColor = isPass
-                    ? 'rgba(16,185,129,0.25)'
-                    : (isUnable ? 'rgba(168,85,247,0.25)' : (f.severity === 'critical' ? 'rgba(244,63,94,0.3)' : 'rgba(245,158,11,0.3)'));
-
-                  const bgColor = isPass
-                    ? 'rgba(16,185,129,0.05)'
-                    : (isUnable ? 'rgba(168,85,247,0.06)' : (f.severity === 'critical' ? 'rgba(244,63,94,0.08)' : 'rgba(245,158,11,0.08)'));
-
-                  return (
-                    <div
-                      key={f.id || idx}
-                      style={{
-                        padding: 12,
-                        borderRadius: 8,
-                        background: bgColor,
-                        border: `1px solid ${borderColor}`,
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: 6
-                      }}
-                    >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 6 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                          {isPdf && (
-                            f.page_number ? (
-                              <button
-                                type="button"
-                                onClick={() => handlePageSelect(f.page_number!)}
-                                style={{
-                                  fontSize: '0.65rem',
-                                  fontWeight: 700,
-                                  padding: '1px 6px',
-                                  borderRadius: 4,
-                                  border: 'none',
-                                  background: selectedPage === f.page_number ? '#6366f1' : 'rgba(99, 102, 241, 0.25)',
-                                  color: '#fff',
-                                  cursor: 'pointer'
-                                }}
-                                title={`Click to jump to Page ${f.page_number}`}
-                              >
-                                Page {f.page_number}
-                              </button>
-                            ) : (
-                              <span style={{
-                                fontSize: '0.65rem',
-                                fontWeight: 600,
-                                padding: '1px 5px',
-                                borderRadius: 4,
-                                background: 'rgba(255,255,255,0.06)',
-                                color: '#94a3b8'
-                              }}>
-                                Caption
-                              </span>
-                            )
-                          )}
-                          <span style={{
-                            fontSize: '0.65rem',
-                            fontWeight: 700,
-                            padding: '1px 5px',
-                            borderRadius: 4,
-                            background: 'rgba(255,255,255,0.08)',
-                            color: '#93c5fd',
-                            textTransform: 'uppercase'
-                          }}>
-                            {f.category}
-                          </span>
-                          <span style={{
-                            fontWeight: 700,
-                            fontSize: '0.82rem',
-                            color: isPass ? '#34d399' : (isUnable ? '#c084fc' : (f.severity === 'critical' ? '#fb7185' : '#fbbf24'))
-                          }}>
-                            {f.title}
-                          </span>
-                        </div>
-
-                        {/* Status / Severity Badge */}
-                        <span style={{
-                          fontSize: '0.65rem',
-                          fontWeight: 700,
-                          padding: '1px 6px',
-                          borderRadius: 4,
-                          whiteSpace: 'nowrap',
-                          background: isPass ? 'rgba(16,185,129,0.2)' : (isUnable ? 'rgba(168,85,247,0.2)' : (f.severity === 'critical' ? 'rgba(244,63,94,0.2)' : 'rgba(245,158,11,0.2)')),
-                          color: isPass ? '#34d399' : (isUnable ? '#d8b4fe' : (f.severity === 'critical' ? '#fb7185' : '#fcd34d'))
-                        }}>
-                          {isPass ? 'PASSED' : (isUnable ? 'UNVERIFIED' : f.severity.toUpperCase())}
-                        </span>
-                      </div>
-
-                      <div style={{ fontSize: '0.78rem', color: '#e2e8f0', lineHeight: 1.4 }}>
-                        {f.explanation}
-                      </div>
-
-                      {f.text_excerpt && (
-                        <div style={{
-                          padding: '4px 8px',
-                          background: 'rgba(0,0,0,0.3)',
-                          borderRadius: 4,
-                          fontFamily: 'monospace',
-                          fontSize: '0.7rem',
-                          color: '#cbd5e1'
-                        }}>
-                          Measurement / Excerpt: "{f.text_excerpt}"
-                        </div>
-                      )}
-
-                      <div style={{ fontSize: '0.7rem', marginTop: 2, paddingTop: 4, borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-                        <div style={{ color: 'var(--text-dim)' }}>
-                          Source: <strong style={{ color: f.source_citation === 'SUPPORTING EVIDENCE NOT FOUND' ? '#fb7185' : '#818cf8' }}>
-                            {f.source_citation}
-                          </strong>
-                        </div>
-                        {f.recommended_action && f.recommended_action !== 'No change needed.' && (
-                          <div style={{ color: '#38bdf8', marginTop: 2 }}>
-                            Action: {f.recommended_action}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Milestone 5D: Context-Preserving Correction Suggestion */}
-                      {(() => {
-                        const sug = suggestions[f.id] || f.suggestion;
-                        if (!sug) return null;
-
-                        return (
-                          <div style={{
-                            marginTop: 8,
-                            padding: '10px 12px',
-                            borderRadius: 8,
-                            background: 'rgba(99, 102, 241, 0.08)',
-                            border: '1px solid rgba(99, 102, 241, 0.25)',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: 8
-                          }}>
-                            {/* Header */}
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: '0.78rem', color: '#a5b4fc' }}>
-                                <Sparkles size={14} color="#818cf8" />
-                                <span>Context-Preserving Correction</span>
-                              </div>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                <span style={{
-                                  fontSize: '0.65rem',
-                                  fontWeight: 700,
-                                  padding: '1px 5px',
-                                  borderRadius: 4,
-                                  background: 'rgba(99, 102, 241, 0.2)',
-                                  color: '#c7d2fe',
-                                  textTransform: 'uppercase'
-                                }}>
-                                  {sug.correction_type.replace(/_/g, ' ')}
-                                </span>
-                                <span style={{
-                                  fontSize: '0.65rem',
-                                  fontWeight: 700,
-                                  padding: '1px 6px',
-                                  borderRadius: 4,
-                                  background: sug.status === 'applied'
-                                    ? 'rgba(16, 185, 129, 0.2)'
-                                    : (sug.status === 'accepted'
-                                      ? 'rgba(56, 189, 248, 0.2)'
-                                      : (sug.status === 'rejected'
-                                        ? 'rgba(148, 163, 184, 0.2)'
-                                        : (sug.status === 'stale'
-                                          ? 'rgba(245, 158, 11, 0.2)'
-                                          : 'rgba(168, 85, 247, 0.2)'))),
-                                  color: sug.status === 'applied'
-                                    ? '#34d399'
-                                    : (sug.status === 'accepted'
-                                      ? '#38bdf8'
-                                      : (sug.status === 'rejected'
-                                        ? '#94a3b8'
-                                        : (sug.status === 'stale'
-                                          ? '#fbbf24'
-                                          : '#d8b4fe')))
-                                }}>
-                                  {sug.status.toUpperCase()}
-                                </span>
-                              </div>
-                            </div>
-
-                            {/* Explanation */}
-                            <div style={{ fontSize: '0.75rem', color: '#e2e8f0', lineHeight: 1.4 }}>
-                              {sug.explanation}
-                            </div>
-
-                            {/* Diff Preview / Proposed Passage */}
-                            {sug.diff_preview ? (
-                              <div style={{
-                                background: 'rgba(0,0,0,0.4)',
-                                padding: '8px 10px',
-                                borderRadius: 6,
-                                fontFamily: 'monospace',
-                                fontSize: '0.72rem',
-                                lineHeight: 1.5,
-                                whiteSpace: 'pre-wrap',
-                                border: '1px solid rgba(255,255,255,0.06)'
-                              }}>
-                                {sug.diff_preview.split('\n').map((line, lIdx) => (
-                                  <div key={lIdx} style={{
-                                    color: line.startsWith('+') ? '#34d399' : (line.startsWith('-') ? '#fb7185' : '#cbd5e1'),
-                                    fontWeight: (line.startsWith('+') || line.startsWith('-')) ? 600 : 400
-                                  }}>
-                                    {line}
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (
-                              sug.proposed_text && (
-                                <div style={{
-                                  background: 'rgba(0,0,0,0.4)',
-                                  padding: '6px 10px',
-                                  borderRadius: 6,
-                                  fontFamily: 'monospace',
-                                  fontSize: '0.72rem',
-                                  color: '#34d399'
-                                }}>
-                                  Proposed: "{sug.proposed_text}"
-                                </div>
-                              )
-                            )}
-
-                            {/* Evidence Citation */}
-                            <div style={{ fontSize: '0.68rem', color: 'var(--text-dim)' }}>
-                              Supporting Evidence: <span style={{ color: '#93c5fd' }}>{sug.evidence_source}</span>
-                            </div>
-
-                            {/* Artwork notice if not body text */}
-                            {sug.target_type !== 'body_text' && (
-                              <div style={{
-                                padding: '4px 8px',
-                                borderRadius: 4,
-                                background: 'rgba(245, 158, 11, 0.1)',
-                                border: '1px solid rgba(245, 158, 11, 0.25)',
-                                fontSize: '0.68rem',
-                                color: '#fcd34d',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 6
-                              }}>
-                                <Info size={12} />
-                                <span>Artwork Notice: This creative asset cannot be modified directly via text replacement. Update in authoring tool and re-upload.</span>
-                              </div>
-                            )}
-
-                            {/* Staleness Notice */}
-                            {(sug.status === 'stale' || isDirty) && (
-                              <div style={{
-                                padding: '4px 8px',
-                                borderRadius: 4,
-                                background: 'rgba(245, 158, 11, 0.12)',
-                                border: '1px solid rgba(245, 158, 11, 0.3)',
-                                fontSize: '0.68rem',
-                                color: '#fbbf24',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 6
-                              }}>
-                                <AlertTriangle size={12} />
-                                <span>Draft modified since check. Re-run governance check to refresh suggestions.</span>
-                              </div>
-                            )}
-
-                            {/* Action Buttons if pending */}
-                            {sug.status === 'pending' && !isDirty && (
-                              <div style={{ display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
-                                {sug.can_auto_apply ? (
-                                  <>
-                                    <button
-                                      type="button"
-                                      disabled={suggestionApplying}
-                                      onClick={() => handleAcceptSuggestion(sug)}
-                                      style={{
-                                        padding: '4px 10px',
-                                        borderRadius: 5,
-                                        border: 'none',
-                                        background: '#4f46e5',
-                                        color: '#fff',
-                                        fontSize: '0.72rem',
-                                        fontWeight: 600,
-                                        cursor: 'pointer',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: 4
-                                      }}
-                                    >
-                                      <Sparkles size={12} />
-                                      Accept & Create Revision
-                                    </button>
-                                    <button
-                                      type="button"
-                                      disabled={suggestionApplying}
-                                      onClick={() => handleOpenCustomEdit(sug)}
-                                      style={{
-                                        padding: '4px 8px',
-                                        borderRadius: 5,
-                                        border: '1px solid rgba(255,255,255,0.15)',
-                                        background: 'rgba(255,255,255,0.05)',
-                                        color: '#e2e8f0',
-                                        fontSize: '0.72rem',
-                                        cursor: 'pointer'
-                                      }}
-                                    >
-                                      Edit Before Applying
-                                    </button>
-                                  </>
-                                ) : (
-                                  <button
-                                    type="button"
-                                    disabled={suggestionApplying}
-                                    onClick={() => handleAcceptSuggestion(sug)}
-                                    style={{
-                                      padding: '4px 10px',
-                                      borderRadius: 5,
-                                      border: '1px solid rgba(56, 189, 248, 0.4)',
-                                      background: 'rgba(56, 189, 248, 0.15)',
-                                      color: '#38bdf8',
-                                      fontSize: '0.72rem',
-                                      fontWeight: 600,
-                                      cursor: 'pointer'
-                                    }}
-                                  >
-                                    Acknowledge Guidance
-                                  </button>
-                                )}
-                                <button
-                                  type="button"
-                                  disabled={suggestionApplying}
-                                  onClick={() => handleRejectSuggestion(sug)}
-                                  style={{
-                                    padding: '4px 8px',
-                                    borderRadius: 5,
-                                    border: '1px solid rgba(255,255,255,0.08)',
-                                    background: 'transparent',
-                                    color: '#94a3b8',
-                                    fontSize: '0.72rem',
-                                    cursor: 'pointer'
-                                  }}
-                                >
-                                  Reject
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          )}
+          <GovernanceReviewPanel
+            latestGovRun={latestGovRun}
+            checkedVersionNum={checkedVersionNum}
+            checkedVersionId={checkedVersionId}
+            isDirty={isDirty}
+            isPdf={isPdf}
+            pdfPageCount={pdfPageCount}
+            selectedPage={selectedPage}
+            onSelectPage={setSelectedPage}
+            govError={govError}
+            checking={checking}
+            onRunChecks={handleRunChecks}
+            suggestions={suggestions}
+            suggestionApplying={suggestionApplying}
+            onAcceptSuggestion={handleAcceptSuggestion}
+            onRejectSuggestion={handleRejectSuggestion}
+            onOpenCustomEdit={handleOpenCustomEdit}
+            suggestionBanner={suggestionBanner}
+            onCloseSuggestionBanner={() => setSuggestionBanner(null)}
+          />
         </div>
       </div>
 
@@ -2136,7 +1684,7 @@ export const ContentStudio: React.FC = () => {
               <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-dim)' }} />
               <input
                 type="text"
-                placeholder="Search drafts by title, channel..."
+                placeholder="Search drafts by title, brand..."
                 value={draftSearchQuery}
                 onChange={(e) => setDraftSearchQuery(e.target.value)}
                 className="input"
@@ -2154,6 +1702,7 @@ export const ContentStudio: React.FC = () => {
                 filteredDrafts.map((item) => {
                   const isSelected = selectedContent?.id === item.id;
                   const hasPoster = Boolean(item.latest_version?.poster_file_path);
+                  const itemBrand = brands.find(b => b.id === item.brand_id);
 
                   return (
                     <div
@@ -2188,7 +1737,7 @@ export const ContentStudio: React.FC = () => {
                       </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
                         <StatusBadge status={item.status} />
-                        <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>{item.channel}</span>
+                        <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>{itemBrand?.name || 'General Draft'}</span>
                       </div>
                     </div>
                   );

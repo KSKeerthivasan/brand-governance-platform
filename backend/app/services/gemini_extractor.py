@@ -3,8 +3,6 @@ import time
 import random
 import logging
 from typing import Tuple, List, Dict, Any, Optional
-from google import genai
-from google.genai import types
 from pydantic import ValidationError
 
 from app.config import settings
@@ -135,6 +133,9 @@ def run_gemini_pdf_extraction(
         "attempts": [],
         "model": model_name
     }
+
+    from google import genai
+    from google.genai import types
 
     client = genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=25000))
     uploaded_file = None

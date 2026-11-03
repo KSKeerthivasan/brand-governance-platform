@@ -102,6 +102,16 @@ async def upload_poster(
         get_governance_processing_image(local_path)
     except Exception:
         pass
+    finally:
+        del file_bytes, chunks
+        import gc
+        gc.collect()
+        try:
+            import ctypes
+            libc = ctypes.CDLL("libc.so.6")
+            libc.malloc_trim(0)
+        except Exception:
+            pass
 
     return {
         "file_path": dest_path,
@@ -247,18 +257,19 @@ def create_content_item(
         product_id=req.product_id,
         created_by=current_user.id,
         title=req.title,
-        channel=req.channel,
+        channel=req.channel or "General",
         current_version_num=1,
         status="draft"
     )
     db.add(content_item)
     db.flush()
 
-    checksum = ContentVersion.calculate_checksum(req.body_text, req.poster_file_path)
+    body_text_to_save = req.body_text or ""
+    checksum = ContentVersion.calculate_checksum(body_text_to_save, req.poster_file_path)
     version = ContentVersion(
         content_item_id=content_item.id,
         version_num=1,
-        body_text=req.body_text,
+        body_text=body_text_to_save,
         checksum=checksum,
         created_by=current_user.id,
         poster_file_path=req.poster_file_path,
@@ -365,35 +376,60 @@ def update_content_item(
         ContentVersion.version_num == item.current_version_num
     ).first()
 
-    text_changed = latest_ver and (latest_ver.body_text != req.body_text)
-    poster_changed = latest_ver and (
-        (latest_ver.poster_file_path != req.poster_file_path) or
-        (latest_ver.poster_alt_text != req.poster_alt_text)
-    )
-    title_changed = bool(req.title and item.title != req.title)
-    channel_changed = bool(req.channel and item.channel != req.channel)
+    fields_set = req.model_fields_set
 
-    if req.title:
+    # Determine body_text (preserve existing if omitted in partial update)
+    if "body_text" in fields_set:
+        body_text_to_save = req.body_text or ""
+    else:
+        body_text_to_save = latest_ver.body_text if latest_ver else ""
+
+    # Determine poster fields (preserve existing if omitted in partial update)
+    if "poster_file_path" in fields_set:
+        poster_file_path_to_save = req.poster_file_path
+    else:
+        poster_file_path_to_save = latest_ver.poster_file_path if latest_ver else None
+
+    if "poster_asset_id" in fields_set:
+        poster_asset_id_to_save = req.poster_asset_id
+    else:
+        poster_asset_id_to_save = latest_ver.poster_asset_id if latest_ver else None
+
+    if "poster_alt_text" in fields_set:
+        poster_alt_text_to_save = req.poster_alt_text
+    else:
+        poster_alt_text_to_save = latest_ver.poster_alt_text if latest_ver else None
+
+    text_changed = latest_ver and (latest_ver.body_text != body_text_to_save)
+    poster_changed = latest_ver and (
+        (latest_ver.poster_file_path != poster_file_path_to_save) or
+        (latest_ver.poster_alt_text != poster_alt_text_to_save) or
+        (latest_ver.poster_asset_id != poster_asset_id_to_save)
+    )
+    title_changed = bool("title" in fields_set and req.title and item.title != req.title)
+    channel_changed = bool("channel" in fields_set and req.channel and item.channel != req.channel)
+
+    if "title" in fields_set and req.title:
         item.title = req.title
-    if req.channel:
+    if "channel" in fields_set and req.channel:
         item.channel = req.channel
-    if req.product_id is not None:
+    if "product_id" in fields_set:
         item.product_id = req.product_id
 
     if text_changed or poster_changed or title_changed or channel_changed or item.status in ["submitted", "approved", "changes_requested"]:
         # Create a new version
         new_version_num = item.current_version_num + 1
-        new_checksum = ContentVersion.calculate_checksum(req.body_text, req.poster_file_path)
+        new_checksum = ContentVersion.calculate_checksum(body_text_to_save, poster_file_path_to_save)
 
         new_version = ContentVersion(
             content_item_id=item.id,
             version_num=new_version_num,
-            body_text=req.body_text,
+            body_text=body_text_to_save,
             checksum=new_checksum,
             created_by=current_user.id,
-            poster_file_path=req.poster_file_path,
-            poster_asset_id=req.poster_asset_id,
-            poster_alt_text=req.poster_alt_text
+            poster_file_path=poster_file_path_to_save,
+            poster_asset_id=poster_asset_id_to_save,
+            poster_alt_text=poster_alt_text_to_save
         )
         db.add(new_version)
         item.current_version_num = new_version_num

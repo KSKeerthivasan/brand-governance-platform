@@ -4,8 +4,7 @@ import time
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, field
 from PIL import Image
-import pypdf
-import pypdfium2
+# pypdf and pypdfium2 imported lazily inside methods to reduce container memory footprint
 
 MAX_PDF_FILE_SIZE_BYTES = 25 * 1024 * 1024  # 25 MB
 MAX_PDF_PAGE_COUNT = 30  # Bounded execution limit

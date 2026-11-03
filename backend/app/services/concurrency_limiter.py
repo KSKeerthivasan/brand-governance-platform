@@ -39,7 +39,7 @@ class HeavyImageGovernanceLimiter:
         self,
         max_active: int = 1,
         max_waiting: int = 1,
-        wait_timeout: float = 25.0
+        wait_timeout: float = 45.0
     ):
         self.max_active = max_active
         self.max_waiting = max_waiting
@@ -150,6 +150,6 @@ class HeavyImageGovernanceLimiter:
 image_governance_limiter = HeavyImageGovernanceLimiter(
     max_active=1,
     max_waiting=1,
-    wait_timeout=25.0
+    wait_timeout=45.0
 )
 

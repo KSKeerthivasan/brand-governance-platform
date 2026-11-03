@@ -6,6 +6,7 @@ from typing import Dict, Any, List, Optional, Tuple, Union
 from PIL import Image
 import numpy as np
 import cv2
+import gc
 from sqlalchemy.orm import Session
 from app.models.content import GovernanceFinding
 from app.models.knowledge import KnowledgeRule, KnowledgeFact, BrandAsset
@@ -198,7 +199,9 @@ class ImageGovernanceService:
             ))
             return findings
 
+        cv_img = None
         try:
+            cv_img = cv2.imread(file_path)
             # -------------------------------------------------------------
             # CHECK 1: Format, Dimensions & Aspect Ratio
             # (Evaluated against original asset dimensions and EXIF orientation)
@@ -219,59 +222,76 @@ class ImageGovernanceService:
                     format_name = pil_img.format or "UNKNOWN"
                     actual_ratio = width / max(height, 1)
 
-            spec = CHANNEL_DIMENSION_STANDARDS.get(channel, CHANNEL_DIMENSION_STANDARDS["Social Media"])
-            min_w = spec.get("min_width", 800)
-            min_h = spec.get("min_height", 800)
-            target_ratio_str = spec.get("aspect_ratio")
+            if channel and channel in CHANNEL_DIMENSION_STANDARDS:
+                spec = CHANNEL_DIMENSION_STANDARDS[channel]
+                min_w = spec.get("min_width", 800)
+                min_h = spec.get("min_height", 800)
+                target_ratio_str = spec.get("aspect_ratio")
 
-            # Resolution evaluation
-            if width < min_w or height < min_h:
-                findings.append(GovernanceFinding(
-                    category="dimensions",
-                    severity="warning",
-                    title=f"Resolution Deficiency for {channel}",
-                    explanation=f"Creative resolution is {width}x{height}px, below the required minimum of {min_w}x{min_h}px for {channel}.",
-                    text_excerpt=f"{width}x{height}px (Min: {min_w}x{min_h}px)",
-                    source_citation=f"Channel Standards ({channel})",
-                    recommended_action=f"Export asset at minimum {min_w}x{min_h}px to ensure crisp rendering on {channel}.",
-                    status="verified_issue"
-                ))
-            else:
-                findings.append(GovernanceFinding(
-                    category="dimensions",
-                    severity="info",
-                    title=f"Resolution Verified for {channel}",
-                    explanation=f"Creative resolution {width}x{height}px meets the channel specification of min {min_w}x{min_h}px.",
-                    text_excerpt=f"{width}x{height}px ({format_name}, {mode})",
-                    source_citation=f"Channel Standards ({channel})",
-                    recommended_action="No change needed.",
-                    status="passed_check"
-                ))
-
-            # Aspect ratio evaluation
-            if target_ratio_str:
-                num, den = [float(x) for x in target_ratio_str.split(":")]
-                expected_ratio = num / den
-                tolerance = spec.get("tolerance", 0.08)
-                if abs(actual_ratio - expected_ratio) > tolerance:
+                # Resolution evaluation
+                if width < min_w or height < min_h:
                     findings.append(GovernanceFinding(
                         category="dimensions",
                         severity="warning",
-                        title=f"Aspect Ratio Mismatch for {channel}",
-                        explanation=f"Measured aspect ratio is {round(actual_ratio, 2)}:1, which deviates from standard {target_ratio_str} for {channel}.",
-                        text_excerpt=f"Measured {round(actual_ratio, 2)}:1 vs Target {target_ratio_str}",
+                        title=f"Resolution Deficiency for {channel}",
+                        explanation=f"Creative resolution is {width}x{height}px, below the required minimum of {min_w}x{min_h}px for {channel}.",
+                        text_excerpt=f"{width}x{height}px (Min: {min_w}x{min_h}px)",
                         source_citation=f"Channel Standards ({channel})",
-                        recommended_action=f"Crop creative to {target_ratio_str} ratio before public publishing.",
+                        recommended_action=f"Export asset at minimum {min_w}x{min_h}px to ensure crisp rendering on {channel}.",
                         status="verified_issue"
                     ))
                 else:
                     findings.append(GovernanceFinding(
                         category="dimensions",
                         severity="info",
-                        title=f"Aspect Ratio Verified ({target_ratio_str})",
-                        explanation=f"Creative aspect ratio {round(actual_ratio, 2)}:1 conforms to the expected {target_ratio_str} standard.",
-                        text_excerpt=f"{round(actual_ratio, 2)}:1",
+                        title=f"Resolution Verified for {channel}",
+                        explanation=f"Creative resolution {width}x{height}px meets the channel specification of min {min_w}x{min_h}px.",
+                        text_excerpt=f"{width}x{height}px ({format_name}, {mode})",
                         source_citation=f"Channel Standards ({channel})",
+                        recommended_action="No change needed.",
+                        status="passed_check"
+                    ))
+
+                # Aspect ratio evaluation
+                if target_ratio_str:
+                    num, den = [float(x) for x in target_ratio_str.split(":")]
+                    expected_ratio = num / den
+                    tolerance = spec.get("tolerance", 0.08)
+                    min_allowed = round(expected_ratio - tolerance, 2)
+                    max_allowed = round(expected_ratio + tolerance, 2)
+                    tolerance_pct = int(round(tolerance * 100))
+                    if abs(actual_ratio - expected_ratio) > tolerance:
+                        findings.append(GovernanceFinding(
+                            category="dimensions",
+                            severity="warning",
+                            title=f"Aspect Ratio Mismatch for {channel}",
+                            explanation=f"Measured aspect ratio is {round(actual_ratio, 2)}:1, which deviates from the permitted range of {min_allowed}:1 to {max_allowed}:1 for {channel} (standard {target_ratio_str} ±{tolerance_pct}%).",
+                            text_excerpt=f"Measured {round(actual_ratio, 2)}:1 vs Permitted {min_allowed}:1–{max_allowed}:1",
+                            source_citation=f"Channel Standards ({channel})",
+                            recommended_action=f"Crop creative to within {min_allowed}:1 to {max_allowed}:1 for {channel} before public publishing.",
+                            status="verified_issue"
+                        ))
+                    else:
+                        findings.append(GovernanceFinding(
+                            category="dimensions",
+                            severity="info",
+                            title=f"Aspect Ratio Within Permitted Range ({round(actual_ratio, 2)}:1 vs {target_ratio_str})",
+                            explanation=f"Creative aspect ratio {round(actual_ratio, 2)}:1 is within the permitted range of {min_allowed}:1 to {max_allowed}:1 for {channel} (standard {target_ratio_str} ±{tolerance_pct}%).",
+                            text_excerpt=f"{round(actual_ratio, 2)}:1 (Permitted: {min_allowed}:1–{max_allowed}:1)",
+                            source_citation=f"Channel Standards ({channel})",
+                            recommended_action="No change needed.",
+                            status="passed_check"
+                        ))
+            else:
+                # General advertisement (no specific publishing destination assumed)
+                if width > 0 and height > 0:
+                    findings.append(GovernanceFinding(
+                        category="dimensions",
+                        severity="info",
+                        title="Image Dimensions Verified",
+                        explanation=f"Creative dimensions are {width}x{height}px ({round(actual_ratio, 2)}:1 aspect ratio, {format_name}, {mode}).",
+                        text_excerpt=f"{width}x{height}px ({format_name}, {mode})",
+                        source_citation="Asset Technical Specifications",
                         recommended_action="No change needed.",
                         status="passed_check"
                     ))
@@ -279,7 +299,7 @@ class ImageGovernanceService:
             # -------------------------------------------------------------
             # CHECK 2: Dominant-Colour Analysis against Approved Palette
             # -------------------------------------------------------------
-            dominant_colors = self._extract_dominant_colors(file_path, k=5)
+            dominant_colors = self._extract_dominant_colors(cv_img if cv_img is not None else file_path, k=5)
             approved_colors, color_rule = self._get_approved_brand_colors(db, org_id, brand_id, resolved_kb=resolved_kb)
 
             if not approved_colors:
@@ -338,7 +358,8 @@ class ImageGovernanceService:
             contrast_findings = self._evaluate_localized_text_contrast(
                 file_path=file_path,
                 ocr_result=ocr_result,
-                scale=proc_ctx.scale if proc_ctx else 1.0
+                scale=proc_ctx.scale if proc_ctx else 1.0,
+                cv_img=cv_img
             )
             findings.extend(contrast_findings)
 
@@ -361,7 +382,7 @@ class ImageGovernanceService:
                 ))
             else:
                 logo_local_path = storage_service.get_file_path_for_processing(logo_asset.file_path)
-                match_score, match_loc = self._match_logo_template(file_path, logo_local_path)
+                match_score, match_loc = self._match_logo_template(cv_img if cv_img is not None else file_path, logo_local_path)
                 if match_score >= 0.70:
                     findings.append(GovernanceFinding(
                         category="logo",
@@ -450,6 +471,16 @@ class ImageGovernanceService:
                 recommended_action="Ensure the image file is an uncorrupted PNG, JPG, or WEBP file.",
                 status="unable_to_verify"
             ))
+        finally:
+            if cv_img is not None:
+                del cv_img
+            gc.collect()
+            try:
+                import ctypes
+                libc = ctypes.CDLL("libc.so.6")
+                libc.malloc_trim(0)
+            except Exception:
+                pass
 
         if page_number is not None:
             for f in findings:
@@ -465,16 +496,23 @@ class ImageGovernanceService:
     # HELPER METHODS
     # =========================================================================
 
-    def _extract_dominant_colors(self, file_path: str, k: int = 5) -> List[Tuple[str, float, Tuple[int, int, int]]]:
+    def _extract_dominant_colors(self, file_path_or_img: Union[str, np.ndarray], k: int = 5) -> List[Tuple[str, float, Tuple[int, int, int]]]:
         """
         Extracts dominant colors using k-means clustering on pixels.
+        Accepts either a file path or an already decoded BGR numpy image array.
         Returns list of (hex_code, percentage, (r, g, b)).
         """
         try:
-            with Image.open(file_path) as pil_img:
-                rgb_img = pil_img.convert("RGB")
-                small_img = rgb_img.resize((150, 150))
-                pixels = np.float32(np.array(small_img).reshape(-1, 3))
+            if isinstance(file_path_or_img, np.ndarray):
+                small_bgr = cv2.resize(file_path_or_img, (150, 150))
+                small_rgb = cv2.cvtColor(small_bgr, cv2.COLOR_BGR2RGB)
+                pixels = np.float32(small_rgb.reshape(-1, 3))
+                del small_bgr, small_rgb
+            else:
+                with Image.open(file_path_or_img) as pil_img:
+                    rgb_img = pil_img.convert("RGB")
+                    small_img = rgb_img.resize((150, 150))
+                    pixels = np.float32(np.array(small_img).reshape(-1, 3))
 
             criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 20, 0.2)
             _, labels, centers = cv2.kmeans(pixels, k, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS)
@@ -732,14 +770,23 @@ class ImageGovernanceService:
             fg_lum = calculate_relative_luminance(fg_rgb)
             cr = calculate_contrast_ratio(fg_lum, bg_lum)
 
-            # Measure stroke thickness using distance transform on foreground stroke mask
+            # Measure stroke thickness using bounded ROI distance transform on foreground stroke mask
             stroke_submask = (labels.flatten() == fg_cluster_idx)
-            fg_img_mask = np.zeros((img_h, img_w), dtype=np.uint8)
             fg_pts_coords = np.where(mask_text == 255)
-            if len(fg_pts_coords[0]) == len(stroke_submask):
-                fg_img_mask[fg_pts_coords[0][stroke_submask], fg_pts_coords[1][stroke_submask]] = 255
-            dist_map = cv2.distanceTransform(fg_img_mask, cv2.DIST_L2, 3)
-            stroke_width = round(2.0 * float(np.max(dist_map)), 1) if np.any(fg_img_mask) else 1.0
+            if len(fg_pts_coords[0]) == len(stroke_submask) and np.any(stroke_submask):
+                y_indices = fg_pts_coords[0][stroke_submask]
+                x_indices = fg_pts_coords[1][stroke_submask]
+                min_y, max_y = int(np.min(y_indices)), int(np.max(y_indices)) + 1
+                min_x, max_x = int(np.min(x_indices)), int(np.max(x_indices)) + 1
+                roi_h = max_y - min_y
+                roi_w = max_x - min_x
+                fg_roi = np.zeros((roi_h + 2, roi_w + 2), dtype=np.uint8)
+                fg_roi[y_indices - min_y + 1, x_indices - min_x + 1] = 255
+                dist_map = cv2.distanceTransform(fg_roi, cv2.DIST_L2, 3)
+                stroke_width = round(2.0 * float(np.max(dist_map)), 1)
+                del fg_roi, dist_map
+            else:
+                stroke_width = 1.0
 
             # Typography Classification & Threshold Determination:
             # Policy (Milestone 5A.2):
@@ -855,22 +902,27 @@ class ImageGovernanceService:
                 stroke_width=stroke_width
             ))
 
+        del all_text_mask, all_text_dilated, rgb_img
+        gc.collect()
         return results
 
     def _evaluate_localized_text_contrast(
         self,
         file_path: str,
         ocr_result: Optional[OCRResult] = None,
-        scale: float = 1.0
+        scale: float = 1.0,
+        cv_img: Optional[np.ndarray] = None
     ) -> List[GovernanceFinding]:
         """
         Evaluates localized text contrast for each OCR-detected text region and emits
         defensible WCAG findings grounded in localized pixel evidence.
         """
         findings: List[GovernanceFinding] = []
-        cv_img = None
+        own_cv_img = False
         try:
-            cv_img = cv2.imread(file_path)
+            if cv_img is None:
+                cv_img = cv2.imread(file_path)
+                own_cv_img = True
             if cv_img is None:
                 findings.append(GovernanceFinding(
                     category="contrast",
@@ -1052,7 +1104,7 @@ class ImageGovernanceService:
                 status="unable_to_verify"
             ))
         finally:
-            if cv_img is not None:
+            if own_cv_img and cv_img is not None:
                 del cv_img
                 import gc
                 gc.collect()
@@ -1173,17 +1225,24 @@ class ImageGovernanceService:
 
         return logo_asset, logo_rule
 
-    def _match_logo_template(self, poster_path: str, logo_path: str) -> Tuple[float, Tuple[int, int]]:
+    def _match_logo_template(self, poster_path_or_img: Union[str, np.ndarray], logo_path: str) -> Tuple[float, Tuple[int, int]]:
         """
         Performs multi-scale OpenCV template matching to locate official logo in poster.
+        Accepts either poster file path or decoded BGR numpy image array.
         Returns (max_correlation, (x, y)).
         """
         poster = None
         logo = None
         gray_poster = None
         gray_logo = None
+        own_poster = False
         try:
-            poster = cv2.imread(poster_path)
+            if isinstance(poster_path_or_img, np.ndarray):
+                poster = poster_path_or_img
+            else:
+                poster = cv2.imread(poster_path_or_img)
+                own_poster = True
+
             logo = cv2.imread(logo_path)
 
             if poster is None or logo is None:
@@ -1226,7 +1285,9 @@ class ImageGovernanceService:
         except Exception:
             return 0.0, (0, 0)
         finally:
-            del poster, logo, gray_poster, gray_logo
+            if own_poster and poster is not None:
+                del poster
+            del logo, gray_poster, gray_logo
             import gc
             gc.collect()
 

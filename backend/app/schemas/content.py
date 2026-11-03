@@ -23,8 +23,8 @@ class ContentItemCreate(BaseModel):
     brand_id: str
     product_id: Optional[str] = None
     title: str
-    channel: str = "Social Media"
-    body_text: str
+    channel: Optional[str] = "General"
+    body_text: Optional[str] = ""
     poster_file_path: Optional[str] = None
     poster_asset_id: Optional[str] = None
     poster_alt_text: Optional[str] = None
@@ -33,7 +33,7 @@ class ContentItemUpdate(BaseModel):
     product_id: Optional[str] = None
     title: Optional[str] = None
     channel: Optional[str] = None
-    body_text: str
+    body_text: Optional[str] = None
     poster_file_path: Optional[str] = None
     poster_asset_id: Optional[str] = None
     poster_alt_text: Optional[str] = None

@@ -40,6 +40,8 @@ backend/test_inkloom.db
 backend/storage_data/
 storage_data/
 test_assets/
+.proc_cache/
+**/.proc_cache/
 
 # Testing & Coverage
 .pytest_cache/

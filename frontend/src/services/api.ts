@@ -327,8 +327,8 @@ class ApiService {
   async createContentItem(
     brandId: string,
     title: string,
-    channel: string,
-    bodyText: string,
+    channel: string = 'General',
+    bodyText: string = '',
     posterFilePath?: string,
     posterAssetId?: string,
     posterAltText?: string,
@@ -351,7 +351,7 @@ class ApiService {
 
   async updateContentItem(
     contentId: string,
-    bodyText: string,
+    bodyText: string = '',
     title?: string,
     channel?: string,
     posterFilePath?: string,
