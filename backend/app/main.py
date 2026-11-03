@@ -89,7 +89,9 @@ def health_check():
         "service": settings.PROJECT_NAME,
         "version": settings.VERSION,
         "environment": settings.ENVIRONMENT,
-        "database_engine": engine.name
+        "database_engine": engine.name,
+        "malloc_arena_max": os.environ.get("MALLOC_ARENA_MAX"),
+        "commit": os.environ.get("RENDER_GIT_COMMIT", "local")
     }
 
 @app.get("/")

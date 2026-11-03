@@ -24,6 +24,8 @@ services:
         value: inkloom-private-assets
       - key: CORS_ORIGINS
         value: https://ad-governance.web.app,https://ad-governance.firebaseapp.com
+      - key: MALLOC_ARENA_MAX
+        value: "2"
       - key: DATABASE_URL
         sync: false
       - key: SECRET_KEY
