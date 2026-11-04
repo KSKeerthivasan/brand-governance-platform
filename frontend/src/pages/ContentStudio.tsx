@@ -822,7 +822,7 @@ export const ContentStudio: React.FC = () => {
             style={{ fontSize: '0.82rem', padding: '7px 14px', display: 'inline-flex', alignItems: 'center', gap: 6 }}
             title="Open drafts and revision history drawer"
           >
-            <FolderOpen size={15} color="#818cf8" />
+            <FolderOpen size={15} color="#4ade80" />
             Drafts ({contentList.length})
           </button>
           <button
@@ -867,7 +867,7 @@ export const ContentStudio: React.FC = () => {
                     fontWeight: 600,
                     padding: '6px 12px',
                     height: 38,
-                    background: '#0b111e',
+                    background: '#111613',
                     flex: 1,
                     maxWidth: 360
                   }}
@@ -935,7 +935,7 @@ export const ContentStudio: React.FC = () => {
                   fontWeight: 600,
                   height: 44,
                   padding: '10px 14px',
-                  background: '#0b111e'
+                  background: '#111613'
                 }}
               />
             </div>
@@ -958,16 +958,16 @@ export const ContentStudio: React.FC = () => {
                     gap: 8,
                     padding: '10px 14px',
                     borderRadius: 8,
-                    border: contentType === 'image' ? '1.5px solid #818cf8' : '1px solid var(--border-subtle)',
-                    background: contentType === 'image' ? 'rgba(99, 102, 241, 0.15)' : 'rgba(255, 255, 255, 0.02)',
-                    color: contentType === 'image' ? '#c7d2fe' : 'var(--text-muted)',
+                    border: contentType === 'image' ? '1.5px solid #22c55e' : '1px solid var(--border-subtle)',
+                    background: contentType === 'image' ? 'rgba(34, 197, 94, 0.15)' : 'rgba(255, 255, 255, 0.02)',
+                    color: contentType === 'image' ? '#4ade80' : 'var(--text-muted)',
                     fontWeight: contentType === 'image' ? 600 : 500,
                     fontSize: '0.82rem',
                     cursor: 'pointer',
                     transition: 'all 0.15s ease'
                   }}
                 >
-                  <ImageIcon size={16} color={contentType === 'image' ? '#818cf8' : 'currentColor'} />
+                  <ImageIcon size={16} color={contentType === 'image' ? '#22c55e' : 'currentColor'} />
                   Image Advertisement
                 </button>
                 <button
@@ -981,16 +981,16 @@ export const ContentStudio: React.FC = () => {
                     gap: 8,
                     padding: '10px 14px',
                     borderRadius: 8,
-                    border: contentType === 'text' ? '1.5px solid #818cf8' : '1px solid var(--border-subtle)',
-                    background: contentType === 'text' ? 'rgba(99, 102, 241, 0.15)' : 'rgba(255, 255, 255, 0.02)',
-                    color: contentType === 'text' ? '#c7d2fe' : 'var(--text-muted)',
+                    border: contentType === 'text' ? '1.5px solid #22c55e' : '1px solid var(--border-subtle)',
+                    background: contentType === 'text' ? 'rgba(34, 197, 94, 0.15)' : 'rgba(255, 255, 255, 0.02)',
+                    color: contentType === 'text' ? '#4ade80' : 'var(--text-muted)',
                     fontWeight: contentType === 'text' ? 600 : 500,
                     fontSize: '0.82rem',
                     cursor: 'pointer',
                     transition: 'all 0.15s ease'
                   }}
                 >
-                  <FileText size={16} color={contentType === 'text' ? '#818cf8' : 'currentColor'} />
+                  <FileText size={16} color={contentType === 'text' ? '#22c55e' : 'currentColor'} />
                   Text Advertisement
                 </button>
                 <button
@@ -1004,16 +1004,16 @@ export const ContentStudio: React.FC = () => {
                     gap: 8,
                     padding: '10px 14px',
                     borderRadius: 8,
-                    border: contentType === 'both' ? '1.5px solid #818cf8' : '1px solid var(--border-subtle)',
-                    background: contentType === 'both' ? 'rgba(99, 102, 241, 0.15)' : 'rgba(255, 255, 255, 0.02)',
-                    color: contentType === 'both' ? '#c7d2fe' : 'var(--text-muted)',
+                    border: contentType === 'both' ? '1.5px solid #22c55e' : '1px solid var(--border-subtle)',
+                    background: contentType === 'both' ? 'rgba(34, 197, 94, 0.15)' : 'rgba(255, 255, 255, 0.02)',
+                    color: contentType === 'both' ? '#4ade80' : 'var(--text-muted)',
                     fontWeight: contentType === 'both' ? 600 : 500,
                     fontSize: '0.82rem',
                     cursor: 'pointer',
                     transition: 'all 0.15s ease'
                   }}
                 >
-                  <Layers size={16} color={contentType === 'both' ? '#818cf8' : 'currentColor'} />
+                  <Layers size={16} color={contentType === 'both' ? '#22c55e' : 'currentColor'} />
                   Image + Text Advertisement
                 </button>
               </div>
@@ -1031,7 +1031,7 @@ export const ContentStudio: React.FC = () => {
                     setIsDirty(true);
                   }}
                   className="select"
-                  style={{ height: 40, fontSize: '0.82rem', padding: '6px 10px', background: '#0b111e' }}
+                  style={{ height: 40, fontSize: '0.82rem', padding: '6px 10px', background: '#111613' }}
                 >
                   {brands.length === 0 ? (
                     <option value="">Default Brand</option>
@@ -1053,7 +1053,7 @@ export const ContentStudio: React.FC = () => {
                     setIsDirty(true);
                   }}
                   className="select"
-                  style={{ height: 40, fontSize: '0.82rem', padding: '6px 10px', background: '#0b111e' }}
+                  style={{ height: 40, fontSize: '0.82rem', padding: '6px 10px', background: '#111613' }}
                 >
                   <option value="">General / All Catalogue Products</option>
                   {products.map((p) => (
@@ -1091,7 +1091,7 @@ export const ContentStudio: React.FC = () => {
                 fontSize: '0.92rem',
                 lineHeight: 1.6,
                 padding: '12px 14px',
-                background: '#0b111e'
+                background: '#111613'
               }}
             />
           </div>
@@ -1117,7 +1117,7 @@ export const ContentStudio: React.FC = () => {
                   flexShrink: 0
                 }} />
                 <span style={{ fontSize: '0.78rem', fontWeight: 600, color: '#e2e8f0', display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <Sparkles size={14} color="#818cf8" />
+                  <Sparkles size={14} color="#4ade80" />
                   In-Editor Real-Time Assistant
                   <span style={{ fontSize: '0.68rem', color: 'var(--text-dim)', fontWeight: 400 }}>
                     (Preliminary Copy Checks • 600ms Debounce)
@@ -1183,7 +1183,7 @@ export const ContentStudio: React.FC = () => {
                   style={{
                     background: 'none',
                     border: 'none',
-                    color: '#818cf8',
+                    color: '#4ade80',
                     cursor: 'pointer',
                     fontSize: '0.7rem',
                     textDecoration: 'underline',
@@ -1236,7 +1236,7 @@ export const ContentStudio: React.FC = () => {
                         style={{
                           padding: '4px 10px',
                           fontSize: '0.72rem',
-                          background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
+                          background: '#22c55e', color: '#052e16', fontWeight: 600,
                           whiteSpace: 'nowrap',
                           gap: 4,
                           flexShrink: 0
@@ -1296,7 +1296,7 @@ export const ContentStudio: React.FC = () => {
                   }}
                   onClick={() => fileInputRef.current?.click()}
                 >
-                  <Upload size={26} color="#818cf8" style={{ margin: '0 auto 8px auto' }} />
+                  <Upload size={26} color="#4ade80" style={{ margin: '0 auto 8px auto' }} />
                   <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#e2e8f0' }}>
                     {uploadingPoster ? 'Uploading creative...' : 'Upload Advertisement Creative Artwork'}
                   </div>
@@ -1316,8 +1316,7 @@ export const ContentStudio: React.FC = () => {
                 <div style={{
                   padding: '12px 14px',
                   borderRadius: 8,
-                  background: 'rgba(99, 102, 241, 0.05)',
-                  border: '1px solid rgba(99, 102, 241, 0.16)',
+                  background: 'linear-gradient(180deg, #18221b 0%, #111613 100%)', border: '1px solid rgba(74, 222, 128, 0.2)',
                   fontSize: '0.76rem',
                   lineHeight: 1.5,
                   textAlign: 'left',
@@ -1325,8 +1324,8 @@ export const ContentStudio: React.FC = () => {
                   flexDirection: 'column',
                   gap: 6
                 }}>
-                  <div style={{ fontWeight: 600, color: '#c7d2fe', display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.80rem' }}>
-                    <Info size={15} color="#818cf8" style={{ flexShrink: 0 }} />
+                  <div style={{ fontWeight: 600, color: '#4ade80', display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.80rem' }}>
+                    <Info size={15} color="#4ade80" style={{ flexShrink: 0 }} />
                     Recommended Poster Size: 835 × 1080 px
                   </div>
                   <div style={{ color: '#cbd5e1' }}>
@@ -1353,7 +1352,7 @@ export const ContentStudio: React.FC = () => {
                     </span>
                     <select
                       className="select"
-                      style={{ fontSize: '0.78rem', padding: '6px 10px', height: 36, background: '#0b111e' }}
+                      style={{ fontSize: '0.78rem', padding: '6px 10px', height: 36, background: '#111613' }}
                       onChange={(e) => e.target.value && handleSelectBrandAsset(e.target.value)}
                       defaultValue=""
                     >
@@ -1403,8 +1402,8 @@ export const ContentStudio: React.FC = () => {
                             gap: 5,
                             padding: '3px 8px',
                             borderRadius: 4,
-                            border: isCur ? '1px solid #6366f1' : '1px solid rgba(255,255,255,0.1)',
-                            background: isCur ? 'rgba(99, 102, 241, 0.25)' : 'rgba(255,255,255,0.04)',
+                            border: isCur ? '1px solid #22c55e' : '1px solid rgba(255,255,255,0.1)',
+                            background: isCur ? 'rgba(34, 197, 94, 0.25)' : 'rgba(255,255,255,0.04)',
                             color: isCur ? '#fff' : 'var(--text-muted)',
                             fontSize: '0.72rem',
                             fontWeight: isCur ? 700 : 500,
@@ -1428,13 +1427,12 @@ export const ContentStudio: React.FC = () => {
                     gap: 10,
                     padding: '10px 14px',
                     borderRadius: 8,
-                    background: 'rgba(99, 102, 241, 0.08)',
-                    border: '1px solid rgba(99, 102, 241, 0.25)',
+                    background: 'rgba(74, 222, 128, 0.08)', border: '1px solid rgba(74, 222, 128, 0.25)',
                     color: '#cbd5e1',
                     fontSize: '0.78rem',
                     lineHeight: 1.5
                   }}>
-                    <Info size={16} color="#818cf8" style={{ flexShrink: 0, marginTop: 2 }} />
+                    <Info size={16} color="#4ade80" style={{ flexShrink: 0, marginTop: 2 }} />
                     <div>
                       <div style={{ fontWeight: 600, color: '#e0e7ff', marginBottom: 2 }}>
                         Image Resized for Analysis
@@ -1458,7 +1456,7 @@ export const ContentStudio: React.FC = () => {
                           height: 120,
                           objectFit: 'contain',
                           borderRadius: 8,
-                          background: '#090d16',
+                          background: '#111613',
                           border: '1px solid rgba(255,255,255,0.15)'
                         }}
                         onError={(e) => {
@@ -1493,7 +1491,7 @@ export const ContentStudio: React.FC = () => {
                       justifyContent: 'center',
                       flexShrink: 0
                     }}>
-                      <ImageIcon size={36} color="#818cf8" />
+                      <ImageIcon size={36} color="#4ade80" />
                     </div>
                   )}
 
@@ -1510,7 +1508,7 @@ export const ContentStudio: React.FC = () => {
                       <div>
                         Original Resolution: <strong>{posterMeta.width}x{posterMeta.height}px</strong> ({posterMeta.color_mode || 'RGB'})
                         {(posterMeta.width > 835 || posterMeta.height > 1080) && (
-                          <span style={{ marginLeft: 6, color: '#818cf8', fontSize: '0.72rem' }}>
+                          <span style={{ marginLeft: 6, color: '#4ade80', fontSize: '0.72rem' }}>
                             (governance analyzed within 835×1080 bounds)
                           </span>
                         )}
@@ -1541,7 +1539,7 @@ export const ContentStudio: React.FC = () => {
                     }}
                     className="input"
                     placeholder={isPdf ? "Describe the overall presentation deck content..." : "Describe the image content and visual text for screen-reader accessibility..."}
-                    style={{ fontSize: '0.82rem', padding: '8px 12px', background: '#0b111e' }}
+                    style={{ fontSize: '0.82rem', padding: '8px 12px', background: '#111613' }}
                   />
                 </div>
               </div>
@@ -1579,8 +1577,7 @@ export const ContentStudio: React.FC = () => {
                 style={{
                   fontSize: '0.85rem',
                   padding: '8px 18px',
-                  background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
-                  boxShadow: '0 4px 14px rgba(99, 102, 241, 0.4)'
+                  background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)', color: '#052e16', fontWeight: 700, boxShadow: '0 4px 14px rgba(34, 197, 94, 0.3)'
                 }}
               >
                 <Play size={15} /> {checking ? 'Evaluating...' : 'Run Governance Check'}
@@ -1654,7 +1651,7 @@ export const ContentStudio: React.FC = () => {
             height: '100vh',
             borderRadius: 0,
             borderRight: '1px solid var(--border-subtle)',
-            background: '#0f1523',
+            background: '#0c100e',
             display: 'flex',
             flexDirection: 'column',
             padding: 20
@@ -1663,7 +1660,7 @@ export const ContentStudio: React.FC = () => {
             <div className="flex-between" style={{ marginBottom: 16, borderBottom: '1px solid var(--border-subtle)', paddingBottom: 12 }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: '1.05rem', color: '#fff', display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <FolderOpen size={18} color="#818cf8" />
+                  <FolderOpen size={18} color="#4ade80" />
                   Drafts & Revision History
                 </h3>
                 <span style={{ fontSize: '0.74rem', color: 'var(--text-dim)' }}>
@@ -1688,7 +1685,7 @@ export const ContentStudio: React.FC = () => {
                 value={draftSearchQuery}
                 onChange={(e) => setDraftSearchQuery(e.target.value)}
                 className="input"
-                style={{ paddingLeft: 32, fontSize: '0.82rem', height: 36, background: '#0b111e' }}
+                style={{ paddingLeft: 32, fontSize: '0.82rem', height: 36, background: '#111613' }}
               />
             </div>
 
@@ -1714,8 +1711,7 @@ export const ContentStudio: React.FC = () => {
                       style={{
                         padding: 12,
                         borderRadius: 8,
-                        background: isSelected ? 'rgba(99, 102, 241, 0.15)' : 'rgba(255, 255, 255, 0.02)',
-                        border: isSelected ? '1px solid rgba(99, 102, 241, 0.4)' : '1px solid var(--border-subtle)',
+                        background: isSelected ? 'rgba(34, 197, 94, 0.15)' : 'rgba(255, 255, 255, 0.02)', border: isSelected ? '1px solid rgba(34, 197, 94, 0.4)' : '1px solid var(--border-subtle)',
                         cursor: 'pointer',
                         transition: 'all 0.15s ease'
                       }}
@@ -1827,7 +1823,7 @@ export const ContentStudio: React.FC = () => {
                 onChange={(e) => setSubmitNotes(e.target.value)}
                 className="textarea"
                 placeholder="e.g., Reviewed against Q4 guidelines. All medical claims removed, poster contrast and brand colors verified."
-                style={{ minHeight: 80, fontSize: '0.82rem', background: '#0b111e' }}
+                style={{ minHeight: 80, fontSize: '0.82rem', background: '#111613' }}
               />
             </div>
 
@@ -1860,7 +1856,7 @@ export const ContentStudio: React.FC = () => {
         }}>
           <div className="card" style={{ width: 520, background: '#131b2e', border: '1px solid rgba(99, 102, 241, 0.3)' }}>
             <h3 style={{ fontSize: '1.05rem', fontWeight: 700, color: '#fff', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Sparkles size={16} color="#818cf8" />
+              <Sparkles size={16} color="#4ade80" />
               Customize Correction Before Applying
             </h3>
             <p className="text-sub" style={{ marginBottom: 12, fontSize: '0.8rem' }}>
@@ -1890,7 +1886,7 @@ export const ContentStudio: React.FC = () => {
                 value={customEditText}
                 onChange={(e) => setCustomEditText(e.target.value)}
                 placeholder="Enter custom replacement copy..."
-                style={{ width: '100%', fontFamily: 'inherit', fontSize: '0.82rem', background: '#0b111e' }}
+                style={{ width: '100%', fontFamily: 'inherit', fontSize: '0.82rem', background: '#111613' }}
               />
             </div>
 

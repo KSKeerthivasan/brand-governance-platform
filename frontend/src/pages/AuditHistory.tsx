@@ -106,11 +106,11 @@ export const AuditHistory: React.FC = () => {
                   width: 38,
                   height: 38,
                   borderRadius: 8,
-                  background: 'rgba(99, 102, 241, 0.12)',
+                  background: 'rgba(34, 197, 94, 0.12)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  color: '#818cf8',
+                  color: '#4ade80',
                   flexShrink: 0
                 }}>
                   <History size={18} />

@@ -42,8 +42,8 @@ export const AdminGuideModal: React.FC<AdminGuideModalProps> = ({ isOpen, onClos
     }}>
       <div style={{
         background: '#131b2e',
-        border: '1px solid rgba(99, 102, 241, 0.35)',
-        boxShadow: '0 20px 50px rgba(0, 0, 0, 0.6), 0 0 30px rgba(99, 102, 241, 0.2)',
+        border: '1px solid rgba(255, 255, 255, 0.08)',
+        boxShadow: '0 20px 50px rgba(0, 0, 0, 0.6), 0 0 30px rgba(34, 197, 94, 0.15)',
         borderRadius: 16,
         width: '100%',
         maxWidth: 720,
@@ -63,11 +63,11 @@ export const AdminGuideModal: React.FC<AdminGuideModalProps> = ({ isOpen, onClos
             width: 44,
             height: 44,
             borderRadius: 12,
-            background: 'linear-gradient(135deg, #6366f1 0%, #4338ca 100%)',
+            background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            boxShadow: '0 0 16px rgba(99, 102, 241, 0.4)',
+            boxShadow: '0 0 16px rgba(34, 197, 94, 0.3)',
             flexShrink: 0
           }}>
             <ShieldCheck size={24} color="#fff" />
@@ -101,18 +101,18 @@ export const AdminGuideModal: React.FC<AdminGuideModalProps> = ({ isOpen, onClos
                 width: 36,
                 height: 36,
                 borderRadius: 8,
-                background: 'rgba(99, 102, 241, 0.15)',
+                background: 'rgba(34, 197, 94, 0.12)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 flexShrink: 0
               }}>
-                <Users size={18} color="#818cf8" />
+                <Users size={18} color="#4ade80" />
               </div>
               <div>
                 <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#fff', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
                   Team & Roles
-                  <span style={{ fontSize: '0.7rem', padding: '2px 8px', borderRadius: 4, background: 'rgba(99, 102, 241, 0.2)', color: '#a5b4fc', border: '1px solid rgba(99, 102, 241, 0.3)' }}>
+                  <span style={{ fontSize: '0.7rem', padding: '2px 8px', borderRadius: 4, background: 'rgba(34, 197, 94, 0.15)', color: '#a5b4fc', border: '1px solid rgba(99, 102, 241, 0.3)' }}>
                     Sidebar &rarr; Team & Roles
                   </span>
                 </div>
@@ -289,7 +289,7 @@ export const AdminGuideModal: React.FC<AdminGuideModalProps> = ({ isOpen, onClos
               display: 'inline-flex',
               alignItems: 'center',
               gap: 8,
-              boxShadow: '0 0 20px rgba(99, 102, 241, 0.4)'
+              boxShadow: '0 0 20px rgba(34, 197, 94, 0.3)'
             }}
           >
             <Check size={16} /> Got it

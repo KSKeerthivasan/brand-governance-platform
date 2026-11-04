@@ -466,7 +466,7 @@ export const KnowledgeLibrary: React.FC = () => {
             className="btn btn-secondary"
             style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.82rem' }}
           >
-            <BookOpen size={15} color="#818cf8" />
+            <BookOpen size={15} color="#4ade80" />
             Brand Profile Form
           </button>
           <button
@@ -481,7 +481,7 @@ export const KnowledgeLibrary: React.FC = () => {
             onClick={handleActivateKnowledgeBase}
             disabled={activating}
             className="btn btn-secondary"
-            style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.82rem', borderColor: 'rgba(99, 102, 241, 0.4)' }}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.82rem', borderColor: 'rgba(74, 222, 128, 0.3)' }}
           >
             <ShieldCheck size={15} color="#60a5fa" />
             {activating ? 'Activating...' : 'Activate Version'}
@@ -540,7 +540,7 @@ export const KnowledgeLibrary: React.FC = () => {
       {activeTab === 'facts' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {/* Sub-Tab Navigation Bar */}
-          <div className="flex-between" style={{ alignItems: 'center', background: 'rgba(15, 23, 42, 0.5)', padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border-subtle)' }}>
+          <div className="flex-between" style={{ alignItems: 'center', background: '#111613', padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border-subtle)' }}>
             <div style={{ display: 'flex', gap: 6 }}>
               <button
                 onClick={() => setFactsSubTab('products')}
@@ -1117,7 +1117,7 @@ export const KnowledgeLibrary: React.FC = () => {
                         style={{
                           height: 150,
                           borderRadius: 6,
-                          background: '#090d16',
+                          background: '#111613',
                           border: '1px solid var(--border-subtle)',
                           display: 'flex',
                           alignItems: 'center',
@@ -1357,7 +1357,7 @@ export const KnowledgeLibrary: React.FC = () => {
           {/* Section 2: Reference Guidelines & Documents */}
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-              <FileText size={16} color="#818cf8" />
+              <FileText size={16} color="#4ade80" />
               <h4 style={{ margin: 0, fontSize: '0.98rem', color: '#f8fafc' }}>
                 Brand Guidelines & Reference Documentation ({sources.length})
               </h4>
@@ -1399,7 +1399,7 @@ export const KnowledgeLibrary: React.FC = () => {
                               {src.filename}
                             </td>
                             <td style={{ padding: '10px 14px' }}>
-                              <span style={{ fontFamily: 'monospace', fontSize: '0.74rem', background: 'rgba(99, 102, 241, 0.1)', color: '#818cf8', padding: '2px 6px', borderRadius: 4 }}>
+                              <span style={{ fontFamily: 'monospace', fontSize: '0.74rem', background: 'rgba(34, 197, 94, 0.1)', color: '#4ade80', padding: '2px 6px', borderRadius: 4 }}>
                                 {isPdf ? 'PDF' : src.mime_type.split('/')[1] || src.mime_type}
                               </span>
                             </td>

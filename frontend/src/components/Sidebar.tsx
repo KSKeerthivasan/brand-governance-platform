@@ -1,27 +1,35 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard,
   BookOpen,
   FileEdit,
   CheckSquare,
-  Image as ImageIcon,
   History,
   Users,
-  ShieldCheck,
-  Sparkles
+  Sparkles,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 export const Sidebar: React.FC = () => {
   const { role, organizationName } = useAuth();
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    return localStorage.getItem('inkloom_sidebar_collapsed') === 'true';
+  });
+
+  const toggleCollapsed = () => {
+    const next = !collapsed;
+    setCollapsed(next);
+    localStorage.setItem('inkloom_sidebar_collapsed', String(next));
+  };
 
   const links = [
     { to: '/', label: 'Dashboard', icon: LayoutDashboard, id: 'sidebar-nav-dashboard' },
     { to: '/knowledge', label: 'Knowledge Library', icon: BookOpen, id: 'sidebar-nav-knowledge' },
     { to: '/content', label: 'Content Studio', icon: FileEdit, id: 'sidebar-nav-content' },
     { to: '/approvals', label: 'Approval Queue', icon: CheckSquare, id: 'sidebar-nav-approvals' },
-    { to: '/image-governance', label: 'Image Governance', icon: ImageIcon, id: 'sidebar-nav-image-gov' },
     { to: '/audit', label: 'Audit History', icon: History, id: 'sidebar-nav-audit' },
     { to: '/team', label: 'Team & Roles', icon: Users, id: 'sidebar-nav-team' },
   ];
@@ -37,44 +45,46 @@ export const Sidebar: React.FC = () => {
   };
 
   return (
-    <aside className="sidebar">
-      {/* Brand Header */}
-      <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', gap: '12px' }}>
+    <aside
+      className="sidebar"
+      style={{
+        width: collapsed ? 76 : 220,
+        background: 'var(--bg-sidebar)',
+        borderRight: '1px solid var(--border-subtle)',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: collapsed ? 'center' : 'stretch',
+        padding: collapsed ? '16px 8px' : '16px 12px',
+        transition: 'width 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+        position: 'relative',
+        zIndex: 10
+      }}
+    >
+      {/* Workspace pill when expanded */}
+      {!collapsed && (
         <div style={{
-          width: 38,
-          height: 38,
+          margin: '0 4px 14px 4px',
+          padding: '8px 12px',
+          background: 'rgba(255,255,255,0.025)',
           borderRadius: 10,
-          background: 'linear-gradient(135deg, #6366f1 0%, #4338ca 100%)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          boxShadow: '0 0 16px rgba(99, 102, 241, 0.4)'
+          border: '1px solid var(--border-subtle)'
         }}>
-          <ShieldCheck size={22} color="#fff" />
-        </div>
-        <div>
-          <div style={{ fontWeight: 800, fontSize: '1.1rem', letterSpacing: '-0.02em', color: '#fff' }}>
-            Inkloom<span style={{ color: '#6366f1' }}>.AI</span>
+          <div style={{ fontSize: '0.68rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700 }}>
+            Workspace
           </div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', fontWeight: 600 }}>Brand Governance</div>
+          <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-main)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {organizationName || 'Freshsip Beverage Co.'}
+          </div>
+          <div style={{ marginTop: 3 }}>
+            <span style={{ fontSize: '0.68rem', padding: '1px 6px', borderRadius: 4, background: 'rgba(74,222,128,0.12)', color: '#4ade80', border: '1px solid rgba(74,222,128,0.25)', fontWeight: 600 }}>
+              {formatRole(role)}
+            </span>
+          </div>
         </div>
-      </div>
-
-      {/* Organization Scope Pill */}
-      <div style={{ margin: '14px 16px 8px 16px', padding: '10px 14px', background: 'rgba(255,255,255,0.03)', borderRadius: 10, border: '1px solid var(--border-subtle)' }}>
-        <div style={{ fontSize: '0.7rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700 }}>Workspace</div>
-        <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {organizationName || 'Freshsip Beverage Co.'}
-        </div>
-        <div style={{ marginTop: 4, display: 'inline-block' }}>
-          <span style={{ fontSize: '0.7rem', padding: '2px 8px', borderRadius: 6, background: 'rgba(99,102,241,0.15)', color: '#a5b4fc', border: '1px solid rgba(99,102,241,0.25)', fontWeight: 600 }}>
-            {formatRole(role)}
-          </span>
-        </div>
-      </div>
+      )}
 
       {/* Nav Navigation Links */}
-      <nav style={{ flex: 1, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+      <nav style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '8px', alignItems: collapsed ? 'center' : 'stretch' }}>
         {links.map((link) => {
           const Icon = link.icon;
           return (
@@ -83,37 +93,96 @@ export const Sidebar: React.FC = () => {
               id={link.id}
               to={link.to}
               end={link.to === '/'}
+              title={link.label}
               style={({ isActive }) => ({
                 display: 'flex',
                 alignItems: 'center',
-                gap: '12px',
-                padding: '10px 14px',
-                borderRadius: '8px',
-                color: isActive ? '#fff' : 'var(--text-muted)',
-                backgroundColor: isActive ? 'rgba(99, 102, 241, 0.16)' : 'transparent',
-                border: isActive ? '1px solid rgba(99, 102, 241, 0.3)' : '1px solid transparent',
+                gap: collapsed ? 0 : '12px',
+                justifyContent: collapsed ? 'center' : 'flex-start',
+                padding: collapsed ? '4px' : '6px 10px',
+                borderRadius: '12px',
                 textDecoration: 'none',
-                fontWeight: isActive ? 600 : 500,
-                fontSize: '0.875rem',
-                transition: 'all 0.15s ease'
+                transition: 'all 0.15s ease',
               })}
             >
-              <Icon size={18} />
-              <span>{link.label}</span>
+              {({ isActive }) => (
+                <>
+                  <div
+                    style={{
+                      width: 44,
+                      height: 44,
+                      borderRadius: 12,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      background: isActive ? '#22c55e' : 'rgba(255, 255, 255, 0.035)',
+                      color: isActive ? '#052e16' : '#94a3b8',
+                      border: isActive ? 'none' : '1px solid rgba(255, 255, 255, 0.06)',
+                      boxShadow: isActive ? '0 0 16px rgba(34, 197, 94, 0.35)' : 'none',
+                      transition: 'all 0.15s ease',
+                      flexShrink: 0
+                    }}
+                  >
+                    <Icon size={20} strokeWidth={isActive ? 2.2 : 1.8} />
+                  </div>
+                  {!collapsed && (
+                    <span style={{
+                      fontSize: '0.84rem',
+                      fontWeight: isActive ? 700 : 500,
+                      color: isActive ? '#fff' : 'var(--text-muted)',
+                      whiteSpace: 'nowrap'
+                    }}>
+                      {link.label}
+                    </span>
+                  )}
+                </>
+              )}
             </NavLink>
           );
         })}
       </nav>
 
       {/* Round 3 Improvement Banner */}
-      <div style={{ padding: '14px', margin: '0 14px 16px 14px', background: 'rgba(99,102,241,0.08)', borderRadius: 10, border: '1px solid rgba(99,102,241,0.2)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#a5b4fc', fontSize: '0.75rem', fontWeight: 700 }}>
-          <Sparkles size={14} /> Round 3 Governance
+      <div style={{
+        padding: collapsed ? '8px 6px' : '10px 12px',
+        margin: '12px 0 6px 0',
+        background: 'rgba(255, 255, 255, 0.025)',
+        borderRadius: 12,
+        border: '1px solid var(--border-subtle)',
+        width: collapsed ? 60 : 'auto',
+        textAlign: collapsed ? 'center' : 'left'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: collapsed ? 'center' : 'flex-start', gap: 6, color: '#4ade80', fontSize: '0.72rem', fontWeight: 700 }}>
+          <Sparkles size={13} color="#4ade80" />
+          {!collapsed && <span>Round 3 Governance</span>}
         </div>
-        <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginTop: 4 }}>
+        <div style={{ fontSize: '0.67rem', color: 'var(--text-dim)', marginTop: 4, lineHeight: 1.35, display: collapsed ? 'none' : 'block' }}>
           Deterministic evidence linking, version checksum immutability, and static-image inspection.
         </div>
       </div>
+
+      {/* Collapse / Expand Toggle Button */}
+      <button
+        onClick={toggleCollapsed}
+        style={{
+          marginTop: 6,
+          background: 'none',
+          border: 'none',
+          color: 'var(--text-dim)',
+          cursor: 'pointer',
+          padding: '6px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: '100%',
+          borderRadius: 8,
+          transition: 'color 0.15s ease'
+        }}
+        title={collapsed ? "Expand navigation sidebar" : "Collapse navigation sidebar"}
+        aria-label={collapsed ? "Expand navigation sidebar" : "Collapse navigation sidebar"}
+      >
+        {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+      </button>
     </aside>
   );
 };

@@ -162,10 +162,10 @@ export const Dashboard: React.FC = () => {
       {/* Welcome Banner */}
       <div style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: 16 }}>
         <div>
-          <div style={{ fontSize: '0.85rem', color: '#818cf8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            {organizationName || 'Brand Workspace'}
+          <div style={{ fontSize: '0.8rem', color: '#4ade80', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>
+            {organizationName || 'FRESHSIP BEVERAGE CO'}
           </div>
-          <h1 className="title-xl" style={{ marginTop: 4 }}>
+          <h1 className="title-xl">
             Historical Governance Analytics & Ambiguity Signals
           </h1>
           <p className="text-sub" style={{ marginTop: 4 }}>
@@ -182,26 +182,26 @@ export const Dashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Primary Navigation Tabs */}
+      {/* Primary Navigation Tabs & Filter Bar */}
       <div style={{
         display: 'flex',
         borderBottom: '1px solid var(--border-subtle)',
-        marginBottom: 20,
+        marginBottom: 24,
         gap: 8,
         alignItems: 'center',
         justifyContent: 'space-between',
         flexWrap: 'wrap'
       }}>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 16 }}>
           <button
             id="tab-btn-overview"
             onClick={() => setActiveTab('overview')}
             style={{
-              padding: '10px 18px',
+              padding: '10px 4px 14px 4px',
               background: 'none',
               border: 'none',
-              borderBottom: activeTab === 'overview' ? '2px solid #818cf8' : '2px solid transparent',
-              color: activeTab === 'overview' ? '#fff' : 'var(--text-dim)',
+              borderBottom: activeTab === 'overview' ? '2px solid #4ade80' : '2px solid transparent',
+              color: activeTab === 'overview' ? '#fff' : 'var(--text-muted)',
               fontWeight: 700,
               fontSize: '0.9rem',
               cursor: 'pointer',
@@ -211,7 +211,7 @@ export const Dashboard: React.FC = () => {
               transition: 'all 0.15s ease'
             }}
           >
-            <BarChart3 size={16} color={activeTab === 'overview' ? '#818cf8' : 'currentColor'} />
+            <BarChart3 size={16} color={activeTab === 'overview' ? '#4ade80' : 'currentColor'} />
             Governance Overview
           </button>
 
@@ -219,11 +219,11 @@ export const Dashboard: React.FC = () => {
             id="tab-btn-recurrence"
             onClick={() => setActiveTab('recurrence')}
             style={{
-              padding: '10px 18px',
+              padding: '10px 4px 14px 4px',
               background: 'none',
               border: 'none',
-              borderBottom: activeTab === 'recurrence' ? '2px solid #818cf8' : '2px solid transparent',
-              color: activeTab === 'recurrence' ? '#fff' : 'var(--text-dim)',
+              borderBottom: activeTab === 'recurrence' ? '2px solid #4ade80' : '2px solid transparent',
+              color: activeTab === 'recurrence' ? '#fff' : 'var(--text-muted)',
               fontWeight: 700,
               fontSize: '0.9rem',
               cursor: 'pointer',
@@ -233,10 +233,10 @@ export const Dashboard: React.FC = () => {
               transition: 'all 0.15s ease'
             }}
           >
-            <Layers size={16} color={activeTab === 'recurrence' ? '#818cf8' : 'currentColor'} />
+            <Layers size={16} color={activeTab === 'recurrence' ? '#4ade80' : 'currentColor'} />
             Recurring Violations
             {repeatedData && repeatedData.total_repeated_rules_count > 0 && (
-              <span style={{ fontSize: '0.7rem', padding: '2px 6px', borderRadius: 10, background: 'rgba(99,102,241,0.2)', color: '#a5b4fc', fontWeight: 700 }}>
+              <span style={{ fontSize: '0.7rem', padding: '2px 6px', borderRadius: 10, background: 'rgba(74,222,128,0.15)', color: '#4ade80', fontWeight: 700 }}>
                 {repeatedData.total_repeated_rules_count}
               </span>
             )}
@@ -246,11 +246,11 @@ export const Dashboard: React.FC = () => {
             id="tab-btn-ambiguity"
             onClick={() => setActiveTab('ambiguity')}
             style={{
-              padding: '10px 18px',
+              padding: '10px 4px 14px 4px',
               background: 'none',
               border: 'none',
-              borderBottom: activeTab === 'ambiguity' ? '2px solid #818cf8' : '2px solid transparent',
-              color: activeTab === 'ambiguity' ? '#fff' : 'var(--text-dim)',
+              borderBottom: activeTab === 'ambiguity' ? '2px solid #4ade80' : '2px solid transparent',
+              color: activeTab === 'ambiguity' ? '#fff' : 'var(--text-muted)',
               fontWeight: 700,
               fontSize: '0.9rem',
               cursor: 'pointer',
@@ -260,10 +260,10 @@ export const Dashboard: React.FC = () => {
               transition: 'all 0.15s ease'
             }}
           >
-            <HelpCircle size={16} color={activeTab === 'ambiguity' ? '#a855f7' : 'currentColor'} />
+            <HelpCircle size={16} color={activeTab === 'ambiguity' ? '#4ade80' : 'currentColor'} />
             Guideline Ambiguity Signals
             {ambiguityData && ambiguityData.flagged_rules_count > 0 && (
-              <span style={{ fontSize: '0.7rem', padding: '2px 6px', borderRadius: 10, background: 'rgba(168,85,247,0.2)', color: '#d8b4fe', fontWeight: 700 }}>
+              <span style={{ fontSize: '0.7rem', padding: '2px 6px', borderRadius: 10, background: 'rgba(74,222,128,0.15)', color: '#4ade80', fontWeight: 700 }}>
                 {ambiguityData.flagged_rules_count} Flagged
               </span>
             )}
@@ -271,21 +271,14 @@ export const Dashboard: React.FC = () => {
         </div>
 
         {/* Global Filter Bar */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingBottom: 6 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingBottom: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <Calendar size={14} color="var(--text-dim)" />
             <select
               id="filter-date-range"
               value={dateRange}
               onChange={(e) => setDateRange(e.target.value)}
-              style={{
-                background: '#1e293b',
-                border: '1px solid var(--border-subtle)',
-                color: '#cbd5e1',
-                padding: '4px 10px',
-                borderRadius: 6,
-                fontSize: '0.78rem'
-              }}
+              className="filter-pill"
             >
               <option value="all">All Time</option>
               <option value="7d">Last 7 Days</option>
@@ -300,14 +293,7 @@ export const Dashboard: React.FC = () => {
               id="filter-channel"
               value={channelFilter}
               onChange={(e) => setChannelFilter(e.target.value)}
-              style={{
-                background: '#1e293b',
-                border: '1px solid var(--border-subtle)',
-                color: '#cbd5e1',
-                padding: '4px 10px',
-                borderRadius: 6,
-                fontSize: '0.78rem'
-              }}
+              className="filter-pill"
             >
               <option value="all">All Channels</option>
               <option value="instagram">Instagram</option>
@@ -322,14 +308,7 @@ export const Dashboard: React.FC = () => {
               id="filter-severity"
               value={severityFilter}
               onChange={(e) => setSeverityFilter(e.target.value)}
-              style={{
-                background: '#1e293b',
-                border: '1px solid var(--border-subtle)',
-                color: '#cbd5e1',
-                padding: '4px 10px',
-                borderRadius: 6,
-                fontSize: '0.78rem'
-              }}
+              className="filter-pill"
             >
               <option value="all">All Severities</option>
               <option value="critical">Critical Only</option>
@@ -341,16 +320,8 @@ export const Dashboard: React.FC = () => {
           <button
             onClick={() => fetchAnalytics()}
             title="Refresh analytics data"
-            style={{
-              background: 'transparent',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: 6,
-              padding: '4px 8px',
-              color: 'var(--text-dim)',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center'
-            }}
+            className="filter-pill"
+            style={{ padding: '6px 10px' }}
           >
             <RefreshCw size={13} className={analyticsLoading ? 'spin' : ''} />
           </button>
@@ -364,30 +335,30 @@ export const Dashboard: React.FC = () => {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
           {/* Top High-level KPIs */}
           <div className="grid-4">
-            <div className="card">
+            <div className="card card-forest">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span className="text-sub" style={{ fontWeight: 600 }}>Total Governance Runs</span>
-                <div style={{ width: 34, height: 34, borderRadius: 8, background: 'rgba(99,102,241,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#818cf8' }}>
+                <span className="text-sub" style={{ fontWeight: 600, color: 'var(--text-main)' }}>Total Governance Runs</span>
+                <div style={{ width: 34, height: 34, borderRadius: 8, background: 'rgba(34,197,94,0.15)', border: '1px solid rgba(34,197,94,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#4ade80' }}>
                   <TrendingUp size={18} />
                 </div>
               </div>
               <div style={{ fontSize: '2rem', fontWeight: 800, color: '#fff', marginTop: 12 }}>
-                {overviewData ? overviewData.total_runs : (loading ? '...' : 0)}
+                {overviewData ? overviewData.total_runs : (loading ? '• • •' : 0)}
               </div>
               <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: 4 }}>
                 Selected period execution count
               </div>
             </div>
 
-            <div className="card">
+            <div className="card card-rust">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span className="text-sub" style={{ fontWeight: 600 }}>Runs With Actionable Issues</span>
-                <div style={{ width: 34, height: 34, borderRadius: 8, background: 'rgba(239,68,68,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#f87171' }}>
+                <span className="text-sub" style={{ fontWeight: 600, color: 'var(--text-main)' }}>Runs With Actionable Issues</span>
+                <div style={{ width: 34, height: 34, borderRadius: 8, background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#f87171' }}>
                   <AlertOctagon size={18} />
                 </div>
               </div>
               <div style={{ fontSize: '2rem', fontWeight: 800, color: '#f87171', marginTop: 12 }}>
-                {overviewData ? overviewData.runs_with_findings_count : (loading ? '...' : 0)}
+                {overviewData ? overviewData.runs_with_findings_count : (loading ? '• • •' : 0)}
               </div>
               <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: 4 }}>
                 {overviewData && overviewData.total_runs > 0 ? (
@@ -398,15 +369,15 @@ export const Dashboard: React.FC = () => {
               </div>
             </div>
 
-            <div className="card">
+            <div className="card card-olive">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span className="text-sub" style={{ fontWeight: 600 }}>Clean Governance Passes</span>
-                <div style={{ width: 34, height: 34, borderRadius: 8, background: 'rgba(16,185,129,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#34d399' }}>
+                <span className="text-sub" style={{ fontWeight: 600, color: 'var(--text-main)' }}>Clean Governance Passes</span>
+                <div style={{ width: 34, height: 34, borderRadius: 8, background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#34d399' }}>
                   <CheckCircle size={18} />
                 </div>
               </div>
               <div style={{ fontSize: '2rem', fontWeight: 800, color: '#34d399', marginTop: 12 }}>
-                {overviewData ? overviewData.clean_runs_count : (loading ? '...' : 0)}
+                {overviewData ? overviewData.clean_runs_count : (loading ? '• • •' : 0)}
               </div>
               <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: 4 }}>
                 {overviewData && overviewData.total_runs > 0 ? (
@@ -417,15 +388,15 @@ export const Dashboard: React.FC = () => {
               </div>
             </div>
 
-            <div className="card">
+            <div className="card card-amber">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span className="text-sub" style={{ fontWeight: 600 }}>Total Findings Logged</span>
-                <div style={{ width: 34, height: 34, borderRadius: 8, background: 'rgba(245,158,11,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fbbf24' }}>
+                <span className="text-sub" style={{ fontWeight: 600, color: 'var(--text-main)' }}>Total Findings Logged</span>
+                <div style={{ width: 34, height: 34, borderRadius: 8, background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fbbf24' }}>
                   <AlertTriangle size={18} />
                 </div>
               </div>
               <div style={{ fontSize: '2rem', fontWeight: 800, color: '#fff', marginTop: 12 }}>
-                {overviewData ? overviewData.total_findings : (loading ? '...' : 0)}
+                {overviewData ? overviewData.total_findings : (loading ? '• • •' : 0)}
               </div>
               <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: 4 }}>
                 {overviewData ? (
@@ -441,24 +412,40 @@ export const Dashboard: React.FC = () => {
           {/* Breakdown: Severity & Finding Categories */}
           <div className="grid-2">
             {/* Severity Distribution Card */}
-            <div className="card">
-              <div className="flex-between" style={{ marginBottom: 14 }}>
-                <h2 className="title-md" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <ShieldCheck size={18} color="#818cf8" /> Findings Classification & Severity
+            <div className="card card-bronze" style={{ borderRadius: 20 }}>
+              <div className="flex-between" style={{ marginBottom: 18 }}>
+                <h2 className="title-md" style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#fff' }}>
+                  <ShieldCheck size={20} color="#4ade80" /> Findings Classification & Severity
                 </h2>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', background: 'rgba(255, 255, 255, 0.05)', padding: '3px 10px', borderRadius: 12, border: '1px solid var(--border-subtle)' }}>
                   Total: {overviewData?.total_findings || 0} checks
                 </span>
               </div>
 
               {!overviewData || overviewData.total_findings === 0 ? (
-                <div style={{ padding: 30, textAlign: 'center', color: 'var(--text-dim)' }}>
-                  No governance findings recorded for the selected filter window.
+                <div style={{ padding: '48px 24px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                  <div style={{
+                    width: 52,
+                    height: 52,
+                    borderRadius: 16,
+                    background: 'rgba(255, 255, 255, 0.04)',
+                    border: '1px solid var(--border-subtle)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    margin: '0 auto 14px auto',
+                    color: '#94a3b8'
+                  }}>
+                    <FileEdit size={22} />
+                  </div>
+                  <div style={{ fontSize: '0.875rem' }}>
+                    No governance findings recorded for the selected filter window.
+                  </div>
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                   {/* Actionable vs Passed Summary Pill */}
-                  <div style={{ display: 'flex', gap: 8, padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 6, fontSize: '0.76rem', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', gap: 8, padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, fontSize: '0.76rem', justifyContent: 'space-between' }}>
                     <span>Actionable Issues: <strong style={{ color: '#f87171' }}>{overviewData.actionable_findings_count}</strong> ({overviewData.actionable_findings_pct}%)</span>
                     <span>Passed Checks: <strong style={{ color: '#34d399' }}>{overviewData.successful_checks_count}</strong> ({overviewData.successful_checks_pct}%)</span>
                     <span>Unresolved: <strong style={{ color: '#38bdf8' }}>{overviewData.unresolved_review_count}</strong> ({overviewData.unresolved_review_pct}%)</span>
@@ -498,14 +485,14 @@ export const Dashboard: React.FC = () => {
                   <div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginBottom: 4 }}>
                       <span style={{ fontWeight: 600, color: '#93c5fd', display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <Info size={14} color="#3b82f6" /> Actionable Informational Reviews
+                        <Info size={14} color="#38bdf8" /> Actionable Informational Reviews
                       </span>
                       <span>
                         <strong style={{ color: '#fff' }}>{overviewData.actionable_findings_by_severity?.['info'] || 0}</strong> ({overviewData.actionable_findings_by_severity_pct?.['info'] || 0}% of actionable)
                       </span>
                     </div>
                     <div style={{ height: 8, background: 'rgba(255,255,255,0.06)', borderRadius: 4, overflow: 'hidden' }}>
-                      <div style={{ height: '100%', width: `${overviewData.actionable_findings_by_severity_pct?.['info'] || 0}%`, background: '#3b82f6', borderRadius: 4 }} />
+                      <div style={{ height: '100%', width: `${overviewData.actionable_findings_by_severity_pct?.['info'] || 0}%`, background: '#38bdf8', borderRadius: 4 }} />
                     </div>
                   </div>
                 </div>
@@ -513,31 +500,47 @@ export const Dashboard: React.FC = () => {
             </div>
 
             {/* Findings by Category */}
-            <div className="card">
-              <div className="flex-between" style={{ marginBottom: 14 }}>
-                <h2 className="title-md" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <Tag size={18} color="#818cf8" /> Findings by Governance Category
+            <div className="card card-forest" style={{ borderRadius: 20 }}>
+              <div className="flex-between" style={{ marginBottom: 18 }}>
+                <h2 className="title-md" style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#fff' }}>
+                  <Tag size={20} color="#4ade80" /> Findings by Governance Category
                 </h2>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', background: 'rgba(255, 255, 255, 0.05)', padding: '3px 10px', borderRadius: 12, border: '1px solid var(--border-subtle)' }}>
                   Targeted policy domains
                 </span>
               </div>
 
               {!overviewData || Object.keys(overviewData.findings_by_category).length === 0 ? (
-                <div style={{ padding: 30, textAlign: 'center', color: 'var(--text-dim)' }}>
-                  No categorized findings recorded in this timeframe.
+                <div style={{ padding: '48px 24px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                  <div style={{
+                    width: 52,
+                    height: 52,
+                    borderRadius: 16,
+                    background: 'rgba(255, 255, 255, 0.04)',
+                    border: '1px solid var(--border-subtle)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    margin: '0 auto 14px auto',
+                    color: '#94a3b8'
+                  }}>
+                    <Tag size={22} />
+                  </div>
+                  <div style={{ fontSize: '0.875rem' }}>
+                    No categorized findings recorded in this timeframe.
+                  </div>
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   {Object.entries(overviewData.findings_by_category).map(([cat, count]) => {
                     const pct = overviewData.total_findings > 0 ? Math.round((count / overviewData.total_findings) * 100) : 0;
                     return (
-                      <div key={cat} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: 'rgba(255,255,255,0.02)', borderRadius: 6 }}>
+                      <div key={cat} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: 'rgba(255,255,255,0.025)', borderRadius: 8, border: '1px solid var(--border-subtle)' }}>
                         <span style={{ fontSize: '0.82rem', fontWeight: 600, color: '#e2e8f0', textTransform: 'capitalize' }}>
                           {cat.replace(/_/g, ' ')}
                         </span>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span style={{ fontSize: '0.8rem', color: '#a5b4fc', fontWeight: 700 }}>
+                          <span style={{ fontSize: '0.8rem', color: '#4ade80', fontWeight: 700 }}>
                             {count}
                           </span>
                           <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>
@@ -556,7 +559,7 @@ export const Dashboard: React.FC = () => {
           {overviewData && overviewData.runs_over_time.length > 0 && (
             <div className="card">
               <h2 className="title-md" style={{ marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Clock size={18} color="#818cf8" /> Governance Activity Over Time
+                <Clock size={18} color="#4ade80" /> Governance Activity Over Time
               </h2>
               <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(overviewData.runs_over_time.length, 12)}, 1fr)`, gap: 10 }}>
                 {overviewData.runs_over_time.slice(-12).map((day) => (
@@ -585,7 +588,7 @@ export const Dashboard: React.FC = () => {
           <div className="grid-2">
             <div className="card">
               <h2 className="title-md" style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-                <TrendingUp size={18} color="#818cf8" /> Governance Operations
+                <TrendingUp size={18} color="#4ade80" /> Governance Operations
               </h2>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 <Link to="/content" className="card card-hoverable" style={{ padding: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-between', textDecoration: 'none' }}>
@@ -595,7 +598,7 @@ export const Dashboard: React.FC = () => {
                       Compose marketing copy and inspect deterministic rule & fact findings.
                     </div>
                   </div>
-                  <ArrowRight size={18} color="#818cf8" />
+                  <ArrowRight size={18} color="#4ade80" />
                 </Link>
 
                 <Link to="/knowledge" className="card card-hoverable" style={{ padding: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-between', textDecoration: 'none' }}>
@@ -605,7 +608,7 @@ export const Dashboard: React.FC = () => {
                       Upload brand guidelines and inspect candidate rules before approval.
                     </div>
                   </div>
-                  <ArrowRight size={18} color="#818cf8" />
+                  <ArrowRight size={18} color="#4ade80" />
                 </Link>
 
                 <Link to="/approvals" className="card card-hoverable" style={{ padding: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-between', textDecoration: 'none' }}>
@@ -615,7 +618,7 @@ export const Dashboard: React.FC = () => {
                       Authorized approval manager review with inline finding feedback.
                     </div>
                   </div>
-                  <ArrowRight size={18} color="#818cf8" />
+                  <ArrowRight size={18} color="#4ade80" />
                 </Link>
               </div>
             </div>
@@ -623,9 +626,9 @@ export const Dashboard: React.FC = () => {
             <div className="card">
               <div className="flex-between" style={{ marginBottom: 16 }}>
                 <h2 className="title-md" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <History size={18} color="#818cf8" /> Live Audit Trail
+                  <History size={18} color="#4ade80" /> Live Audit Trail
                 </h2>
-                <Link to="/audit" style={{ fontSize: '0.8rem', color: '#818cf8', textDecoration: 'none', fontWeight: 600 }}>
+                <Link to="/audit" style={{ fontSize: '0.8rem', color: '#4ade80', textDecoration: 'none', fontWeight: 600 }}>
                   View All →
                 </Link>
               </div>
@@ -681,18 +684,18 @@ export const Dashboard: React.FC = () => {
           <div style={{
             padding: 16,
             borderRadius: 10,
-            background: 'rgba(99, 102, 241, 0.08)',
-            border: '1px solid rgba(99, 102, 241, 0.25)',
+            background: 'rgba(34, 197, 94, 0.08)',
+            border: '1px solid rgba(34, 197, 94, 0.25)',
             display: 'flex',
             alignItems: 'flex-start',
             gap: 12
           }}>
-            <Layers size={20} color="#818cf8" style={{ marginTop: 2, flexShrink: 0 }} />
+            <Layers size={20} color="#4ade80" style={{ marginTop: 2, flexShrink: 0 }} />
             <div>
               <div style={{ fontWeight: 700, fontSize: '0.9rem', color: '#e0e7ff' }}>
                 Repeated Governance Violations Across Content Items
               </div>
-              <div style={{ fontSize: '0.8rem', color: '#c7d2fe', marginTop: 4, lineHeight: 1.4 }}>
+              <div style={{ fontSize: '0.8rem', color: '#f0fdf4', marginTop: 4, lineHeight: 1.4 }}>
                 Ranked by <strong>distinct content items affected</strong> rather than raw finding frequency. Multiple violations within a single document are not conflated with cross-draft recurrence. Reappearance across revision cycles is tracked separately.
               </div>
             </div>
@@ -718,14 +721,14 @@ export const Dashboard: React.FC = () => {
                     className="card"
                     style={{
                       padding: 18,
-                      border: isExpanded ? '1px solid rgba(99,102,241,0.4)' : '1px solid var(--border-subtle)',
+                      border: isExpanded ? '1px solid rgba(34,197,94,0.4)' : '1px solid var(--border-subtle)',
                       transition: 'all 0.15s ease'
                     }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
                       <div style={{ flex: 1 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                          <span style={{ fontSize: '0.75rem', fontWeight: 800, color: '#818cf8', background: 'rgba(99,102,241,0.15)', padding: '2px 8px', borderRadius: 4 }}>
+                          <span style={{ fontSize: '0.75rem', fontWeight: 800, color: '#4ade80', background: 'rgba(34,197,94,0.15)', padding: '2px 8px', borderRadius: 4 }}>
                             #{idx + 1}
                           </span>
                           {item.rule_code && (
@@ -814,7 +817,7 @@ export const Dashboard: React.FC = () => {
                         style={{
                           background: 'none',
                           border: 'none',
-                          color: '#818cf8',
+                          color: '#4ade80',
                           fontSize: '0.75rem',
                           fontWeight: 600,
                           cursor: 'pointer',
@@ -1053,7 +1056,7 @@ export const Dashboard: React.FC = () => {
                     {/* Recommended Action & KB Navigation */}
                     <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
                       <div style={{ fontSize: '0.78rem', color: '#a5b4fc', display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <Sparkles size={14} color="#818cf8" />
+                        <Sparkles size={14} color="#4ade80" />
                         <span><strong>Recommended Action:</strong> {rule.recommended_action}</span>
                       </div>
 

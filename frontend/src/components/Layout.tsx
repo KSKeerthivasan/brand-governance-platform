@@ -31,10 +31,12 @@ export const Layout: React.FC = () => {
   };
 
   return (
-    <div className="app-container">
-      <Sidebar />
-      <div className="main-content">
-        <Navbar />
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden', background: 'var(--bg-main)' }}>
+      {/* Top Navbar spans 100% full width with integrated logo */}
+      <Navbar />
+      {/* Body container with left sidebar rail and main page content */}
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+        <Sidebar />
         <main className="page-body">
           <Outlet />
         </main>

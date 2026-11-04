@@ -325,7 +325,7 @@ export const BrandProfileModal: React.FC<BrandProfileModalProps> = ({
           display: 'flex',
           flexDirection: 'column',
           backgroundColor: '#0b1120',
-          border: '1px solid rgba(99, 102, 241, 0.35)',
+          border: '1px solid rgba(74, 222, 128, 0.25)',
           borderRadius: 16,
           boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.85)',
           overflow: 'hidden'
@@ -348,12 +348,12 @@ export const BrandProfileModal: React.FC<BrandProfileModalProps> = ({
                 width: 44,
                 height: 44,
                 borderRadius: 12,
-                background: 'rgba(99, 102, 241, 0.15)',
-                border: '1px solid rgba(99, 102, 241, 0.3)',
+                background: 'rgba(34, 197, 94, 0.12)',
+                border: '1px solid rgba(74, 222, 128, 0.25)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                color: '#818cf8'
+                color: '#4ade80'
               }}
             >
               <BookOpen size={24} />
@@ -368,9 +368,9 @@ export const BrandProfileModal: React.FC<BrandProfileModalProps> = ({
                     fontSize: '0.7rem',
                     padding: '2px 8px',
                     borderRadius: 10,
-                    background: 'rgba(99, 102, 241, 0.18)',
+                    background: 'rgba(34, 197, 94, 0.15)',
                     color: '#a5b4fc',
-                    border: '1px solid rgba(99, 102, 241, 0.3)'
+                    border: '1px solid rgba(74, 222, 128, 0.25)'
                   }}
                 >
                   Structured Knowledge
@@ -403,7 +403,7 @@ export const BrandProfileModal: React.FC<BrandProfileModalProps> = ({
         {/* Modal Body */}
         {loading ? (
           <div style={{ padding: 80, textAlign: 'center', color: 'var(--text-dim)' }}>
-            <RefreshCw size={32} className="spin" style={{ margin: '0 auto 16px', color: '#818cf8' }} />
+            <RefreshCw size={32} className="spin" style={{ margin: '0 auto 16px', color: '#4ade80' }} />
             <div style={{ fontSize: '0.95rem' }}>Loading Brand Profile...</div>
           </div>
         ) : (
@@ -457,7 +457,7 @@ export const BrandProfileModal: React.FC<BrandProfileModalProps> = ({
                     width: 24,
                     height: 24,
                     borderRadius: 6,
-                    background: 'rgba(99, 102, 241, 0.2)',
+                    background: 'rgba(34, 197, 94, 0.12)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -468,7 +468,7 @@ export const BrandProfileModal: React.FC<BrandProfileModalProps> = ({
                 >
                   A
                 </div>
-                <h3 style={{ fontSize: '0.95rem', color: '#c7d2fe', letterSpacing: '0.04em', margin: 0, fontWeight: 600 }}>
+                <h3 style={{ fontSize: '0.95rem', color: '#4ade80', letterSpacing: '0.04em', margin: 0, fontWeight: 600 }}>
                   Brand Identity & Overview
                 </h3>
               </div>
@@ -539,9 +539,9 @@ export const BrandProfileModal: React.FC<BrandProfileModalProps> = ({
                         style={{
                           padding: '5px 12px',
                           borderRadius: 20,
-                          background: 'rgba(99, 102, 241, 0.14)',
-                          border: '1px solid rgba(99, 102, 241, 0.3)',
-                          color: '#c7d2fe',
+                          background: 'rgba(34, 197, 94, 0.12)',
+                          border: '1px solid rgba(74, 222, 128, 0.25)',
+                          color: '#4ade80',
                           fontSize: '0.82rem',
                           display: 'inline-flex',
                           alignItems: 'center',
@@ -627,7 +627,7 @@ export const BrandProfileModal: React.FC<BrandProfileModalProps> = ({
                     width: 24,
                     height: 24,
                     borderRadius: 6,
-                    background: 'rgba(99, 102, 241, 0.2)',
+                    background: 'rgba(34, 197, 94, 0.12)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -638,7 +638,7 @@ export const BrandProfileModal: React.FC<BrandProfileModalProps> = ({
                 >
                   B
                 </div>
-                <h3 style={{ fontSize: '0.95rem', color: '#c7d2fe', letterSpacing: '0.04em', margin: 0, fontWeight: 600 }}>
+                <h3 style={{ fontSize: '0.95rem', color: '#4ade80', letterSpacing: '0.04em', margin: 0, fontWeight: 600 }}>
                   Voice, Tone & Writing Style
                 </h3>
               </div>
@@ -881,7 +881,7 @@ export const BrandProfileModal: React.FC<BrandProfileModalProps> = ({
                       width: 24,
                       height: 24,
                       borderRadius: 6,
-                      background: 'rgba(99, 102, 241, 0.2)',
+                      background: 'rgba(34, 197, 94, 0.12)',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -893,7 +893,7 @@ export const BrandProfileModal: React.FC<BrandProfileModalProps> = ({
                     C
                   </div>
                   <div>
-                    <h3 style={{ fontSize: '0.95rem', color: '#c7d2fe', letterSpacing: '0.04em', margin: 0, fontWeight: 600 }}>
+                    <h3 style={{ fontSize: '0.95rem', color: '#4ade80', letterSpacing: '0.04em', margin: 0, fontWeight: 600 }}>
                       Brand Color Palette ({colorDrafts.length})
                     </h3>
                   </div>
@@ -1062,7 +1062,7 @@ export const BrandProfileModal: React.FC<BrandProfileModalProps> = ({
                     width: 24,
                     height: 24,
                     borderRadius: 6,
-                    background: 'rgba(99, 102, 241, 0.2)',
+                    background: 'rgba(34, 197, 94, 0.12)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -1073,7 +1073,7 @@ export const BrandProfileModal: React.FC<BrandProfileModalProps> = ({
                 >
                   D
                 </div>
-                <h3 style={{ fontSize: '0.95rem', color: '#c7d2fe', letterSpacing: '0.04em', margin: 0, fontWeight: 600 }}>
+                <h3 style={{ fontSize: '0.95rem', color: '#4ade80', letterSpacing: '0.04em', margin: 0, fontWeight: 600 }}>
                   Typography & Hierarchy Guidelines
                 </h3>
               </div>
@@ -1108,7 +1108,7 @@ export const BrandProfileModal: React.FC<BrandProfileModalProps> = ({
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                  <Eye size={14} color="#818cf8" />
+                  <Eye size={14} color="#4ade80" />
                   <span style={{ fontSize: '0.75rem', color: '#a5b4fc', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                     Typeface Hierarchy Live Preview
                   </span>
@@ -1160,7 +1160,7 @@ export const BrandProfileModal: React.FC<BrandProfileModalProps> = ({
                     width: 24,
                     height: 24,
                     borderRadius: 6,
-                    background: 'rgba(99, 102, 241, 0.2)',
+                    background: 'rgba(34, 197, 94, 0.12)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -1171,7 +1171,7 @@ export const BrandProfileModal: React.FC<BrandProfileModalProps> = ({
                 >
                   E
                 </div>
-                <h3 style={{ fontSize: '0.95rem', color: '#c7d2fe', letterSpacing: '0.04em', margin: 0, fontWeight: 600 }}>
+                <h3 style={{ fontSize: '0.95rem', color: '#4ade80', letterSpacing: '0.04em', margin: 0, fontWeight: 600 }}>
                   Visual Identity Guidelines
                 </h3>
               </div>

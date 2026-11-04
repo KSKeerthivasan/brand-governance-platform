@@ -109,7 +109,7 @@ export const AcceptInvitation: React.FC = () => {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background: 'radial-gradient(circle at 50% 15%, #1e1b4b 0%, #090d16 70%)',
+        background: 'radial-gradient(circle at 50% 15%, #18221b 0%, #080b09 70%)',
         padding: '40px 20px'
       }}
     >
@@ -121,11 +121,11 @@ export const AcceptInvitation: React.FC = () => {
               width: 54,
               height: 54,
               borderRadius: 16,
-              background: 'linear-gradient(135deg, #6366f1 0%, #4338ca 100%)',
+              background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)',
               display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
-              boxShadow: '0 10px 25px -5px rgba(99, 102, 241, 0.5)',
+              boxShadow: '0 10px 25px -5px rgba(34, 197, 94, 0.4)',
               marginBottom: 14
             }}
           >
@@ -140,7 +140,7 @@ export const AcceptInvitation: React.FC = () => {
               margin: '0 0 6px 0'
             }}
           >
-            Inkloom<span style={{ color: '#818cf8' }}>.AI</span>
+            Inkloom<span style={{ color: '#4ade80' }}>.AI</span>
           </h1>
           <p style={{ color: '#94a3b8', fontSize: '0.88rem', margin: 0 }}>
             Brand Governance & Content Integrity Platform
@@ -151,8 +151,8 @@ export const AcceptInvitation: React.FC = () => {
         <div
           className="card"
           style={{
-            backgroundColor: '#0f172a',
-            border: '1px solid rgba(99, 102, 241, 0.25)',
+            backgroundColor: '#0c100e',
+            border: '1px solid rgba(255, 255, 255, 0.08)',
             borderRadius: 16,
             padding: 32,
             boxShadow: '0 20px 40px -15px rgba(0, 0, 0, 0.8)'
@@ -160,7 +160,7 @@ export const AcceptInvitation: React.FC = () => {
         >
           {verifying ? (
             <div style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--text-dim)' }}>
-              <RefreshCw size={28} className="spin" style={{ margin: '0 auto 12px', color: '#818cf8' }} />
+              <RefreshCw size={28} className="spin" style={{ margin: '0 auto 12px', color: '#4ade80' }} />
               <div style={{ color: '#fff', fontWeight: 600 }}>Verifying workspace invitation...</div>
             </div>
           ) : verifyError ? (
@@ -197,8 +197,8 @@ export const AcceptInvitation: React.FC = () => {
                 style={{
                   padding: 16,
                   borderRadius: 12,
-                  background: 'rgba(99, 102, 241, 0.08)',
-                  border: '1px solid rgba(99, 102, 241, 0.25)',
+                  background: 'rgba(34, 197, 94, 0.08)',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
                   marginBottom: 24,
                   display: 'flex',
                   alignItems: 'center',
@@ -210,11 +210,11 @@ export const AcceptInvitation: React.FC = () => {
                     width: 44,
                     height: 44,
                     borderRadius: 10,
-                    background: 'rgba(99, 102, 241, 0.2)',
+                    background: 'rgba(34, 197, 94, 0.15)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    color: '#818cf8'
+                    color: '#4ade80'
                   }}
                 >
                   <Building2 size={24} />

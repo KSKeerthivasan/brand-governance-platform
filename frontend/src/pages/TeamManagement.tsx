@@ -186,9 +186,9 @@ export const TeamManagement: React.FC = () => {
       </div>
 
       {!isAdmin && (
-        <div style={{ padding: '12px 18px', background: 'rgba(99, 102, 241, 0.08)', borderRadius: 10, border: '1px solid rgba(99, 102, 241, 0.25)', marginBottom: 24, display: 'flex', alignItems: 'center', gap: 12 }}>
-          <ShieldAlert size={20} color="#818cf8" />
-          <div style={{ fontSize: '0.82rem', color: '#c7d2fe' }}>
+        <div style={{ padding: '12px 18px', background: 'rgba(34, 197, 94, 0.08)', borderRadius: 10, border: '1px solid rgba(99, 102, 241, 0.25)', marginBottom: 24, display: 'flex', alignItems: 'center', gap: 12 }}>
+          <ShieldAlert size={20} color="#4ade80" />
+          <div style={{ fontSize: '0.82rem', color: '#f0fdf4' }}>
             <strong>Viewing with role '{role}':</strong> Role administration and member invitations are restricted to <strong>Organization Administrator</strong>. Switch personas in the top-right menu to manage access.
           </div>
         </div>
@@ -241,7 +241,7 @@ export const TeamManagement: React.FC = () => {
                       width: 36,
                       height: 36,
                       borderRadius: '50%',
-                      background: 'rgba(99,102,241,0.2)',
+                      background: 'rgba(34, 197, 94, 0.15)',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -301,8 +301,8 @@ export const TeamManagement: React.FC = () => {
                       style={{
                         padding: 14,
                         borderRadius: 8,
-                        background: isPending ? 'rgba(99, 102, 241, 0.04)' : 'rgba(255, 255, 255, 0.01)',
-                        border: `1px solid ${isPending ? 'rgba(99, 102, 241, 0.2)' : 'var(--border-subtle)'}`,
+                        background: isPending ? 'rgba(34, 197, 94, 0.04)' : 'rgba(255, 255, 255, 0.01)',
+                        border: `1px solid ${isPending ? 'rgba(34, 197, 94, 0.2)' : 'var(--border-subtle)'}`,
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'space-between'
@@ -421,8 +421,8 @@ export const TeamManagement: React.FC = () => {
             style={{
               width: '100%',
               maxWidth: 520,
-              backgroundColor: '#0f172a',
-              border: '1px solid rgba(99, 102, 241, 0.3)',
+              backgroundColor: '#0c100e',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
               borderRadius: 16,
               padding: 24,
               boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7)'
@@ -430,7 +430,7 @@ export const TeamManagement: React.FC = () => {
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{ width: 36, height: 36, borderRadius: 8, background: 'rgba(99,102,241,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#818cf8' }}>
+                <div style={{ width: 36, height: 36, borderRadius: 8, background: 'rgba(34, 197, 94, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#4ade80' }}>
                   <Mail size={18} />
                 </div>
                 <div>

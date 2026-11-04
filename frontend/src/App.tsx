@@ -6,7 +6,6 @@ import { Dashboard } from './pages/Dashboard';
 import { KnowledgeLibrary } from './pages/KnowledgeLibrary';
 import { ContentStudio } from './pages/ContentStudio';
 import { ApprovalQueue } from './pages/ApprovalQueue';
-import { ImageGovernance } from './pages/ImageGovernance';
 import { AuditHistory } from './pages/AuditHistory';
 import { TeamManagement } from './pages/TeamManagement';
 import { Login } from './pages/Login';
@@ -17,7 +16,7 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
   const { isAuthenticated, loading } = useAuth();
   if (loading) {
     return (
-      <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#090d16', color: '#818cf8', fontWeight: 600 }}>
+      <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#080b09', color: '#4ade80', fontWeight: 600 }}>
         Loading Inkloom AI Workspace...
       </div>
     );
@@ -49,7 +48,7 @@ export const App: React.FC = () => {
             <Route path="brand-assets" element={<Navigate to="/knowledge?tab=assets" replace />} />
             <Route path="content" element={<ContentStudio />} />
             <Route path="approvals" element={<ApprovalQueue />} />
-            <Route path="image-governance" element={<ImageGovernance />} />
+            <Route path="image-governance" element={<Navigate to="/content" replace />} />
             <Route path="audit" element={<AuditHistory />} />
             <Route path="team" element={<TeamManagement />} />
           </Route>

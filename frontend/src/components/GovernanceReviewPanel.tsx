@@ -525,7 +525,7 @@ export const GovernanceReviewPanel: React.FC<GovernanceReviewPanelProps> = ({
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 10 }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Sparkles size={18} color="#818cf8" />
+              <Sparkles size={18} color="#4ade80" />
               <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: '#f8fafc' }}>
                 Advertisement Review
               </h2>
@@ -776,9 +776,9 @@ export const GovernanceReviewPanel: React.FC<GovernanceReviewPanelProps> = ({
               style={{
                 padding: '3px 8px',
                 borderRadius: 4,
-                border: pdfPageFilter === 'all' ? '1px solid #6366f1' : '1px solid rgba(255, 255, 255, 0.1)',
-                background: pdfPageFilter === 'all' ? '#4f46e5' : 'rgba(255, 255, 255, 0.04)',
-                color: '#fff',
+                border: pdfPageFilter === 'all' ? '1px solid #22c55e' : '1px solid rgba(255, 255, 255, 0.1)',
+                background: pdfPageFilter === 'all' ? '#22c55e' : 'rgba(255, 255, 255, 0.04)',
+                color: pdfPageFilter === 'all' ? '#052e16' : '#fff',
                 fontSize: '0.72rem',
                 fontWeight: 600,
                 cursor: 'pointer'
@@ -808,9 +808,9 @@ export const GovernanceReviewPanel: React.FC<GovernanceReviewPanelProps> = ({
                     gap: 4,
                     padding: '3px 8px',
                     borderRadius: 4,
-                    border: isCur ? '1px solid #6366f1' : '1px solid rgba(255, 255, 255, 0.1)',
-                    background: isCur ? '#4f46e5' : 'rgba(255, 255, 255, 0.04)',
-                    color: isCur ? '#fff' : 'var(--text-muted)',
+                    border: isCur ? '1px solid #22c55e' : '1px solid rgba(255, 255, 255, 0.1)',
+                    background: isCur ? '#22c55e' : 'rgba(255, 255, 255, 0.04)',
+                    color: isCur ? '#052e16' : 'var(--text-muted)',
                     fontSize: '0.72rem',
                     fontWeight: 700,
                     cursor: 'pointer'
@@ -827,9 +827,9 @@ export const GovernanceReviewPanel: React.FC<GovernanceReviewPanelProps> = ({
               style={{
                 padding: '3px 8px',
                 borderRadius: 4,
-                border: pdfPageFilter === 'caption' ? '1px solid #6366f1' : '1px solid rgba(255, 255, 255, 0.1)',
-                background: pdfPageFilter === 'caption' ? '#4f46e5' : 'rgba(255, 255, 255, 0.04)',
-                color: '#fff',
+                border: pdfPageFilter === 'caption' ? '1px solid #22c55e' : '1px solid rgba(255, 255, 255, 0.1)',
+                background: pdfPageFilter === 'caption' ? '#22c55e' : 'rgba(255, 255, 255, 0.04)',
+                color: '#052e16',
                 fontSize: '0.72rem',
                 fontWeight: 600,
                 cursor: 'pointer'
@@ -857,8 +857,8 @@ export const GovernanceReviewPanel: React.FC<GovernanceReviewPanelProps> = ({
                 fontSize: '0.74rem',
                 fontWeight: 600,
                 cursor: 'pointer',
-                background: reviewTab === 'all' ? '#4f46e5' : 'rgba(255, 255, 255, 0.05)',
-                color: '#fff'
+                background: reviewTab === 'all' ? '#22c55e' : 'rgba(255, 255, 255, 0.05)',
+                color: reviewTab === 'all' ? '#052e16' : '#fff'
               }}
             >
               All ({counts.total})
@@ -874,7 +874,7 @@ export const GovernanceReviewPanel: React.FC<GovernanceReviewPanelProps> = ({
                 fontSize: '0.74rem',
                 fontWeight: 600,
                 cursor: 'pointer',
-                background: reviewTab === 'needs_fixes' ? '#4f46e5' : 'rgba(255, 255, 255, 0.05)',
+                background: reviewTab === 'needs_fixes' ? '#e11d48' : 'rgba(255, 255, 255, 0.05)',
                 color: reviewTab === 'needs_fixes' ? '#fff' : (counts.needsFixes > 0 ? '#fca5a5' : '#cbd5e1')
               }}
             >
@@ -891,7 +891,7 @@ export const GovernanceReviewPanel: React.FC<GovernanceReviewPanelProps> = ({
                 fontSize: '0.74rem',
                 fontWeight: 600,
                 cursor: 'pointer',
-                background: reviewTab === 'needs_review' ? '#4f46e5' : 'rgba(255, 255, 255, 0.05)',
+                background: reviewTab === 'needs_review' ? '#d97706' : 'rgba(255, 255, 255, 0.05)',
                 color: reviewTab === 'needs_review' ? '#fff' : (counts.needsReview > 0 ? '#fcd34d' : '#cbd5e1')
               }}
             >
@@ -908,7 +908,7 @@ export const GovernanceReviewPanel: React.FC<GovernanceReviewPanelProps> = ({
                 fontSize: '0.74rem',
                 fontWeight: 600,
                 cursor: 'pointer',
-                background: reviewTab === 'passed' ? '#4f46e5' : 'rgba(255, 255, 255, 0.05)',
+                background: reviewTab === 'passed' ? '#16a34a' : 'rgba(255, 255, 255, 0.05)',
                 color: '#fff'
               }}
             >
@@ -927,9 +927,7 @@ export const GovernanceReviewPanel: React.FC<GovernanceReviewPanelProps> = ({
                 style={{
                   padding: '3px 8px',
                   borderRadius: 4,
-                  border: categoryTab === cat ? '1px solid #6366f1' : '1px solid rgba(255, 255, 255, 0.08)',
-                  background: categoryTab === cat ? 'rgba(99, 102, 241, 0.25)' : 'rgba(255, 255, 255, 0.03)',
-                  color: categoryTab === cat ? '#fff' : '#94a3b8',
+                  border: categoryTab === cat ? '1px solid #22c55e' : '1px solid rgba(255, 255, 255, 0.08)', background: categoryTab === cat ? 'rgba(34, 197, 94, 0.25)' : 'rgba(255, 255, 255, 0.03)', color: categoryTab === cat ? '#4ade80' : '#94a3b8',
                   fontSize: '0.7rem',
                   fontWeight: 600,
                   cursor: 'pointer',
@@ -1003,8 +1001,8 @@ export const GovernanceReviewPanel: React.FC<GovernanceReviewPanelProps> = ({
                                 padding: '1px 6px',
                                 borderRadius: 4,
                                 border: 'none',
-                                background: selectedPage === card.singleFinding.page_number ? '#6366f1' : 'rgba(99, 102, 241, 0.25)',
-                                color: '#fff',
+                                background: selectedPage === card.singleFinding.page_number ? '#22c55e' : 'rgba(34, 197, 94, 0.25)',
+                                color: selectedPage === card.singleFinding.page_number ? '#052e16' : '#fff',
                                 cursor: 'pointer'
                               }}
                               title={`Click to jump to Page ${card.singleFinding.page_number}`}
@@ -1030,7 +1028,7 @@ export const GovernanceReviewPanel: React.FC<GovernanceReviewPanelProps> = ({
                           padding: '2px 6px',
                           borderRadius: 4,
                           background: 'rgba(255, 255, 255, 0.08)',
-                          color: '#93c5fd',
+                          color: '#4ade80',
                           textTransform: 'uppercase'
                         }}>
                           {card.category}
@@ -1173,7 +1171,7 @@ export const GovernanceReviewPanel: React.FC<GovernanceReviewPanelProps> = ({
                           >
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: '0.76rem', color: '#a5b4fc' }}>
-                                <Sparkles size={14} color="#818cf8" />
+                                <Sparkles size={14} color="#4ade80" />
                                 <span>Suggested correction</span>
                               </div>
                               <span style={{
@@ -1182,7 +1180,7 @@ export const GovernanceReviewPanel: React.FC<GovernanceReviewPanelProps> = ({
                                 padding: '1px 5px',
                                 borderRadius: 4,
                                 background: 'rgba(99, 102, 241, 0.2)',
-                                color: '#c7d2fe',
+                                color: '#4ade80',
                                 textTransform: 'uppercase'
                               }}>
                                 {sug.status.toUpperCase()}
@@ -1260,8 +1258,8 @@ export const GovernanceReviewPanel: React.FC<GovernanceReviewPanelProps> = ({
                                         padding: '4px 10px',
                                         borderRadius: 5,
                                         border: 'none',
-                                        background: '#4f46e5',
-                                        color: '#fff',
+                                        background: '#22c55e',
+                                        color: '#052e16',
                                         fontSize: '0.72rem',
                                         fontWeight: 600,
                                         cursor: 'pointer',
@@ -1341,7 +1339,7 @@ export const GovernanceReviewPanel: React.FC<GovernanceReviewPanelProps> = ({
                       style={{
                         background: 'transparent',
                         border: 'none',
-                        color: '#93c5fd',
+                        color: '#4ade80',
                         fontSize: '0.72rem',
                         fontWeight: 600,
                         cursor: 'pointer',
@@ -1377,20 +1375,20 @@ export const GovernanceReviewPanel: React.FC<GovernanceReviewPanelProps> = ({
                             )}
                             <div>
                               <span style={{ color: 'var(--text-dim)' }}>Source Citation: </span>
-                              <span style={{ color: it.finding.source_citation === 'SUPPORTING EVIDENCE NOT FOUND' ? '#fb7185' : '#818cf8', fontWeight: 600 }}>
+                              <span style={{ color: it.finding.source_citation === 'SUPPORTING EVIDENCE NOT FOUND' ? '#fb7185' : '#4ade80', fontWeight: 600 }}>
                                 {it.finding.source_citation}
                               </span>
                             </div>
                             {it.finding.matched_rule_code && (
                               <div>
                                 <span style={{ color: 'var(--text-dim)' }}>Rule Code: </span>
-                                <span style={{ fontFamily: 'monospace', color: '#93c5fd' }}>{it.finding.matched_rule_code}</span>
+                                <span style={{ fontFamily: 'monospace', color: '#4ade80' }}>{it.finding.matched_rule_code}</span>
                               </div>
                             )}
                             {it.finding.matched_fact_key && (
                               <div>
                                 <span style={{ color: 'var(--text-dim)' }}>Fact Key: </span>
-                                <span style={{ fontFamily: 'monospace', color: '#93c5fd' }}>{it.finding.matched_fact_key}</span>
+                                <span style={{ fontFamily: 'monospace', color: '#4ade80' }}>{it.finding.matched_fact_key}</span>
                               </div>
                             )}
                             {it.finding.page_number && (

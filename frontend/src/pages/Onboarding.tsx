@@ -92,7 +92,7 @@ export const Onboarding: React.FC = () => {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      background: 'radial-gradient(circle at 50% 15%, #1e1b4b 0%, #090d16 70%)',
+      background: 'radial-gradient(circle at 50% 15%, #18221b 0%, #080b09 70%)',
       padding: '40px 20px'
     }}>
       <div style={{ width: '100%', maxWidth: 860 }}>
@@ -108,16 +108,16 @@ export const Onboarding: React.FC = () => {
               width: 44,
               height: 44,
               borderRadius: 12,
-              background: 'linear-gradient(135deg, #6366f1 0%, #4338ca 100%)',
+              background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              boxShadow: '0 0 20px rgba(99, 102, 241, 0.5)'
+              boxShadow: '0 0 20px rgba(34, 197, 94, 0.4)'
             }}>
               <ShieldCheck size={26} color="#fff" />
             </div>
             <span style={{ fontSize: '1.6rem', fontWeight: 800, color: '#fff', letterSpacing: '-0.02em' }}>
-              Inkloom<span style={{ color: '#6366f1' }}>.AI</span>
+              Inkloom<span style={{ color: '#4ade80' }}>.AI</span>
             </span>
           </div>
           <h1 className="title-xl" style={{ fontSize: '1.75rem' }}>
@@ -250,15 +250,15 @@ export const Onboarding: React.FC = () => {
                 marginTop: 14,
                 padding: '12px 16px',
                 borderRadius: 8,
-                background: 'rgba(99, 102, 241, 0.08)',
-                border: '1px solid rgba(99, 102, 241, 0.22)',
+                background: 'rgba(34, 197, 94, 0.08)',
+                border: '1px solid rgba(74, 222, 128, 0.22)',
                 fontSize: '0.8rem',
-                color: '#c7d2fe',
+                color: '#f0fdf4',
                 display: 'flex',
                 alignItems: 'flex-start',
                 gap: 10
               }}>
-                <Sparkles size={16} color="#818cf8" style={{ flexShrink: 0, marginTop: 2 }} />
+                <Sparkles size={16} color="#4ade80" style={{ flexShrink: 0, marginTop: 2 }} />
                 <div>
                   <strong>Next step after workspace creation:</strong> You will provide two required assets in the Knowledge Library: <strong>1. One brand guidelines PDF</strong> and <strong>2. One official brand logo</strong>. Product catalogues, nutritional tables, and reference assets are optional and only needed for specific checks.
                 </div>

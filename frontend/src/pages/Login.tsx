@@ -99,7 +99,7 @@ export const Login: React.FC = () => {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      background: 'radial-gradient(circle at 50% 20%, #1e1b4b 0%, #090d16 60%)',
+      background: 'radial-gradient(circle at 50% 20%, #18221b 0%, #080b09 70%)',
       padding: '24px 16px'
     }}>
       <div style={{
@@ -115,7 +115,7 @@ export const Login: React.FC = () => {
           padding: 28,
           background: 'rgba(19, 27, 46, 0.75)',
           backdropFilter: 'blur(16px)',
-          border: '1px solid rgba(99, 102, 241, 0.3)',
+          border: '1px solid rgba(255, 255, 255, 0.08)',
           display: 'flex',
           flexDirection: 'column'
         }}>
@@ -125,17 +125,17 @@ export const Login: React.FC = () => {
               width: 44,
               height: 44,
               borderRadius: 12,
-              background: 'linear-gradient(135deg, #6366f1 0%, #4338ca 100%)',
+              background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              boxShadow: '0 0 20px rgba(99, 102, 241, 0.5)'
+              boxShadow: '0 0 20px rgba(34, 197, 94, 0.4)'
             }}>
               <ShieldCheck size={26} color="#fff" />
             </div>
             <div>
               <div style={{ fontSize: '1.35rem', fontWeight: 800, color: '#fff', letterSpacing: '-0.02em' }}>
-                Inkloom<span style={{ color: '#6366f1' }}>.AI</span>
+                Inkloom<span style={{ color: '#4ade80' }}>.AI</span>
               </div>
               <div style={{ fontSize: '0.8rem', color: '#a5b4fc', fontWeight: 600 }}>Brand Governance Workspace</div>
             </div>
@@ -176,8 +176,8 @@ export const Login: React.FC = () => {
                     alignItems: 'center',
                     justifyContent: 'space-between',
                     textAlign: 'left',
-                    background: isThisLoading ? 'rgba(99, 102, 241, 0.15)' : 'rgba(255, 255, 255, 0.02)',
-                    border: isThisLoading ? '1px solid #818cf8' : '1px solid var(--border-subtle)',
+                    background: isThisLoading ? 'rgba(34, 197, 94, 0.15)' : 'rgba(255, 255, 255, 0.02)',
+                    border: isThisLoading ? '1px solid #22c55e' : '1px solid var(--border-subtle)',
                     cursor: loading ? 'not-allowed' : 'pointer',
                     width: '100%',
                     opacity: loading && !isThisLoading ? 0.6 : 1,
@@ -192,9 +192,9 @@ export const Login: React.FC = () => {
                       <span className="badge" style={{
                         fontSize: '0.65rem',
                         padding: '1px 6px',
-                        background: 'rgba(99, 102, 241, 0.18)',
+                        background: 'rgba(34, 197, 94, 0.15)',
                         color: '#a5b4fc',
-                        border: '1px solid rgba(99, 102, 241, 0.35)'
+                        border: '1px solid rgba(74, 222, 128, 0.3)'
                       }}>
                         {p.label}
                       </span>
@@ -205,9 +205,9 @@ export const Login: React.FC = () => {
                   </div>
                   <div>
                     {isThisLoading ? (
-                      <RefreshCw size={16} className="spin" color="#818cf8" />
+                      <RefreshCw size={16} className="spin" color="#4ade80" />
                     ) : (
-                      <ArrowRight size={16} color="#818cf8" />
+                      <ArrowRight size={16} color="#4ade80" />
                     )}
                   </div>
                 </button>
@@ -221,15 +221,15 @@ export const Login: React.FC = () => {
               marginTop: 14,
               padding: '8px 12px',
               borderRadius: 6,
-              background: 'rgba(99, 102, 241, 0.12)',
-              border: '1px solid rgba(99, 102, 241, 0.3)',
+              background: 'rgba(34, 197, 94, 0.12)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
               fontSize: '0.78rem',
-              color: '#c7d2fe',
+              color: '#f0fdf4',
               display: 'flex',
               alignItems: 'center',
               gap: 8
             }}>
-              <RefreshCw size={14} className="spin" color="#818cf8" />
+              <RefreshCw size={14} className="spin" color="#4ade80" />
               <div>
                 Authenticating as <strong>{activePersona}</strong>...
                 {coldStartNotice && (
@@ -344,7 +344,7 @@ export const Login: React.FC = () => {
 
             <div style={{ marginTop: 22, paddingTop: 16, borderTop: '1px solid var(--border-subtle)', textAlign: 'center' }}>
               <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>Need an isolated workspace? </span>
-              <Link to="/onboarding" style={{ fontSize: '0.82rem', color: '#818cf8', fontWeight: 600, textDecoration: 'none' }}>
+              <Link to="/onboarding" style={{ fontSize: '0.82rem', color: '#4ade80', fontWeight: 600, textDecoration: 'none' }}>
                 Onboard new organization →
               </Link>
             </div>

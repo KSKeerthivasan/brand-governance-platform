@@ -128,7 +128,7 @@ export const FontSelector: React.FC<FontSelectorProps> = ({
           {label} {required && <span style={{ color: '#f87171' }}>*</span>}
         </span>
         {selectedFont && (
-          <span style={{ fontSize: '0.75rem', color: '#818cf8', fontFamily: `"${selectedFont}", sans-serif` }}>
+          <span style={{ fontSize: '0.75rem', color: '#4ade80', fontFamily: `"${selectedFont}", sans-serif` }}>
             Sample: {selectedFont}
           </span>
         )}
@@ -150,7 +150,7 @@ export const FontSelector: React.FC<FontSelectorProps> = ({
           alignItems: 'center',
           justifyContent: 'space-between',
           background: 'rgba(15, 23, 42, 0.6)',
-          borderColor: isOpen ? '#6366f1' : 'rgba(255, 255, 255, 0.12)',
+          borderColor: isOpen ? '#22c55e' : 'rgba(255, 255, 255, 0.12)',
           outline: 'none',
           userSelect: 'none'
         }}
@@ -193,8 +193,8 @@ export const FontSelector: React.FC<FontSelectorProps> = ({
             left: 0,
             right: 0,
             zIndex: 1000,
-            backgroundColor: '#0f172a',
-            border: '1px solid rgba(99, 102, 241, 0.4)',
+            backgroundColor: '#0c100e',
+            border: '1px solid rgba(255, 255, 255, 0.08)',
             borderRadius: 8,
             boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.7), 0 8px 10px -6px rgba(0, 0, 0, 0.5)',
             maxHeight: 280,
@@ -277,7 +277,7 @@ export const FontSelector: React.FC<FontSelectorProps> = ({
                       alignItems: 'center',
                       justifyContent: 'space-between',
                       backgroundColor: isSelected
-                        ? 'rgba(99, 102, 241, 0.2)'
+                        ? 'rgba(34, 197, 94, 0.15)'
                         : isHighlighted
                         ? 'rgba(255, 255, 255, 0.06)'
                         : 'transparent',
@@ -300,7 +300,7 @@ export const FontSelector: React.FC<FontSelectorProps> = ({
                       </span>
                     </div>
 
-                    {isSelected && <Check size={14} color="#818cf8" />}
+                    {isSelected && <Check size={14} color="#4ade80" />}
                   </div>
                 );
               })

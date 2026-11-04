@@ -144,9 +144,9 @@ export const ApprovalQueue: React.FC = () => {
       </div>
 
       {!isApprover && (
-        <div style={{ padding: '12px 18px', background: 'rgba(99, 102, 241, 0.08)', borderRadius: 10, border: '1px solid rgba(99, 102, 241, 0.25)', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 12 }}>
-          <ShieldAlert size={20} color="#818cf8" />
-          <div style={{ fontSize: '0.82rem', color: '#c7d2fe' }}>
+        <div style={{ padding: '12px 18px', background: 'rgba(34, 197, 94, 0.08)', borderRadius: 10, border: '1px solid rgba(99, 102, 241, 0.25)', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 12 }}>
+          <ShieldAlert size={20} color="#4ade80" />
+          <div style={{ fontSize: '0.82rem', color: '#f0fdf4' }}>
             <strong>Viewing with role '{role}':</strong> Only the <strong>Approval Manager</strong> (Marcus Manager) has authority to approve content. Switch to Marcus Manager in the top-right persona menu to execute approval decisions.
           </div>
         </div>
@@ -178,8 +178,8 @@ export const ApprovalQueue: React.FC = () => {
                     style={{
                       padding: 14,
                       borderRadius: 10,
-                      background: isSelected ? 'rgba(99, 102, 241, 0.15)' : 'rgba(255, 255, 255, 0.02)',
-                      border: isSelected ? '1px solid rgba(99, 102, 241, 0.4)' : '1px solid var(--border-subtle)',
+                      background: isSelected ? 'rgba(34, 197, 94, 0.15)' : 'rgba(255, 255, 255, 0.02)',
+                      border: isSelected ? '1px solid rgba(34, 197, 94, 0.4)' : '1px solid var(--border-subtle)',
                       cursor: 'pointer',
                       transition: 'all 0.15s ease'
                     }}
@@ -324,8 +324,8 @@ export const ApprovalQueue: React.FC = () => {
                                 gap: 4,
                                 padding: '2px 6px',
                                 borderRadius: 4,
-                                border: isCur ? '1px solid #6366f1' : '1px solid rgba(255,255,255,0.1)',
-                                background: isCur ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.04)',
+                                border: isCur ? '1px solid #22c55e' : '1px solid rgba(255,255,255,0.1)',
+                                background: isCur ? 'rgba(34,197,94,0.25)' : 'rgba(255,255,255,0.04)',
                                 color: isCur ? '#fff' : 'var(--text-muted)',
                                 fontSize: '0.7rem',
                                 fontWeight: isCur ? 700 : 500,
@@ -403,7 +403,7 @@ export const ApprovalQueue: React.FC = () => {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
                   <div>
                     <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#e2e8f0', display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <Sparkles size={16} color="#818cf8" /> Governance Evidence & Findings Inspector
+                      <Sparkles size={16} color="#4ade80" /> Governance Evidence & Findings Inspector
                     </div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: 2 }}>
                       Evaluated {selectedSub.rules_evaluated_count ?? latestGovRun?.rules_evaluated_count ?? 0} active brand rules and {selectedSub.facts_evaluated_count ?? latestGovRun?.facts_evaluated_count ?? 0} verified facts for Version {selectedSub.version_num}.
@@ -449,7 +449,7 @@ export const ApprovalQueue: React.FC = () => {
                                       padding: '1px 6px',
                                       borderRadius: 4,
                                       border: 'none',
-                                      background: selectedPdfPage === f.page_number ? '#6366f1' : 'rgba(99, 102, 241, 0.25)',
+                                      background: selectedPdfPage === f.page_number ? '#22c55e' : 'rgba(34, 197, 94, 0.25)',
                                       color: '#fff',
                                       cursor: 'pointer'
                                     }}
@@ -555,7 +555,7 @@ export const ApprovalQueue: React.FC = () => {
                                       padding: '1px 6px',
                                       borderRadius: 4,
                                       border: 'none',
-                                      background: selectedPdfPage === f.page_number ? '#6366f1' : 'rgba(99, 102, 241, 0.25)',
+                                      background: selectedPdfPage === f.page_number ? '#22c55e' : 'rgba(34, 197, 94, 0.25)',
                                       color: '#fff',
                                       cursor: 'pointer'
                                     }}

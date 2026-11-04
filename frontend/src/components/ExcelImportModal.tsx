@@ -149,8 +149,8 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
           maxHeight: '90vh',
           display: 'flex',
           flexDirection: 'column',
-          backgroundColor: '#0f172a',
-          border: '1px solid rgba(99, 102, 241, 0.3)',
+          backgroundColor: '#0c100e',
+          border: '1px solid rgba(255, 255, 255, 0.08)',
           borderRadius: 16,
           boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7)',
           overflow: 'hidden'
@@ -172,11 +172,11 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
                 width: 40,
                 height: 40,
                 borderRadius: 10,
-                background: 'rgba(99, 102, 241, 0.15)',
+                background: 'rgba(34, 197, 94, 0.15)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                color: '#818cf8'
+                color: '#4ade80'
               }}
             >
               <FileSpreadsheet size={22} />
@@ -224,8 +224,8 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
                     padding: 16,
                     borderRadius: 10,
                     cursor: 'pointer',
-                    border: `2px solid ${importType === 'product_catalogue' ? '#6366f1' : 'rgba(255,255,255,0.06)'}`,
-                    background: importType === 'product_catalogue' ? 'rgba(99, 102, 241, 0.1)' : 'rgba(255, 255, 255, 0.02)'
+                    border: `2px solid ${importType === 'product_catalogue' ? '#22c55e' : 'rgba(255,255,255,0.06)'}`,
+                    background: importType === 'product_catalogue' ? 'rgba(34, 197, 94, 0.12)' : 'rgba(255, 255, 255, 0.02)'
                   }}
                 >
                   <div style={{ fontWeight: 600, color: '#fff', marginBottom: 4 }}>
@@ -246,8 +246,8 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
                     padding: 16,
                     borderRadius: 10,
                     cursor: 'pointer',
-                    border: `2px solid ${importType === 'claims_and_disclosures' ? '#6366f1' : 'rgba(255,255,255,0.06)'}`,
-                    background: importType === 'claims_and_disclosures' ? 'rgba(99, 102, 241, 0.1)' : 'rgba(255, 255, 255, 0.02)'
+                    border: `2px solid ${importType === 'claims_and_disclosures' ? '#22c55e' : 'rgba(255,255,255,0.06)'}`,
+                    background: importType === 'claims_and_disclosures' ? 'rgba(34, 197, 94, 0.12)' : 'rgba(255, 255, 255, 0.02)'
                   }}
                 >
                   <div style={{ fontWeight: 600, color: '#fff', marginBottom: 4 }}>
@@ -267,8 +267,8 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
               style={{
                 padding: '14px 18px',
                 borderRadius: 10,
-                background: 'rgba(99, 102, 241, 0.06)',
-                border: '1px solid rgba(99, 102, 241, 0.2)',
+                background: 'rgba(34, 197, 94, 0.06)',
+                border: '1px solid rgba(74, 222, 128, 0.2)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
@@ -276,8 +276,8 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <Info size={18} color="#818cf8" />
-                <div style={{ fontSize: '0.82rem', color: '#c7d2fe' }}>
+                <Info size={18} color="#4ade80" />
+                <div style={{ fontSize: '0.82rem', color: '#f0fdf4' }}>
                   Need the authoritative template with locked headers and data validation rules?
                 </div>
               </div>
@@ -305,12 +305,12 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
             <div
               onClick={() => fileInputRef.current?.click()}
               style={{
-                border: '2px dashed rgba(99, 102, 241, 0.4)',
+                border: '2px dashed rgba(74, 222, 128, 0.35)',
                 borderRadius: 12,
                 padding: '40px 20px',
                 textAlign: 'center',
                 cursor: 'pointer',
-                background: selectedFile ? 'rgba(99, 102, 241, 0.05)' : 'transparent',
+                background: selectedFile ? 'rgba(34, 197, 94, 0.08)' : 'transparent',
                 transition: 'all 0.2s'
               }}
             >
@@ -321,7 +321,7 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
                 onChange={handleFileChange}
                 style={{ display: 'none' }}
               />
-              <Upload size={36} color="#818cf8" style={{ margin: '0 auto 12px' }} />
+              <Upload size={36} color="#4ade80" style={{ margin: '0 auto 12px' }} />
               {selectedFile ? (
                 <div>
                   <div style={{ fontWeight: 600, color: '#fff', fontSize: '0.95rem' }}>
